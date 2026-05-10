@@ -483,14 +483,10 @@ class HongjunGateway:
         user_id: Optional[str] = None,
         approved_op: Optional[str] = None,
         step_callback: Optional[callable] = None,
+        conversation_history: Optional[list[dict]] = None,
     ) -> str:
-        """在线程池中执行的同步编排器调用（仅用于复杂任务）
+        """在线程池中执行的同步编排器调用（仅用于复杂任务）"""
 
-        Args:
-            approved_op: 已批准的 operation id（二次调用时传入，跳过危险操作预检）
-            step_callback: 步骤回调，签名 callback(step_type, step_data)
-                           在同步线程中调用，不能执行 async 操作。
-        """
         orch = _get_orchestrator()
         if orch is None:
             return "【系统】编排器未可用，请稍后重试。"
@@ -500,13 +496,12 @@ class HongjunGateway:
                 user_id=user_id,
                 approved_op=approved_op,
                 step_callback=step_callback,
+                conversation_history=conversation_history,
             )
-        except TypeError:
-            # 兼容旧签名（无 approved_op / step_callback 参数）
-            try:
-                return orch.process_request(message, user_id=user_id, approved_op=approved_op)
-            except TypeError:
-                return orch.process_request(message, user_id=user_id)
+        except TypeError as e:
+            # 兼容旧签名
+            logger.warning(f"process_request signature error (may be old version): {e}")
+            return f"【系统】编排器接口版本不匹配：{e}"
         except Exception as e:
             logger.error(f"orchestrator error: {e}")
             return f"【系统错误】处理失败：{e}"
@@ -578,11 +573,12 @@ class HongjunGateway:
         _msg = message
         _plat = session.platform
         _uid = session.platform_chat_id
+        _hist = session.get_messages()
         try:
             loop = asyncio.get_event_loop()
             response_text = await loop.run_in_executor(
                 None,
-                lambda m=_msg, p=_plat, uid=_uid: HongjunGateway._call_orchestrator_impl(m, p, uid),
+                lambda: HongjunGateway._call_orchestrator_impl(_msg, _plat, _uid, conversation_history=_hist),
             )
             if not response_text:
                 response_text = "【系统】编排器返回了空内容，请稍后重试。"
@@ -914,6 +910,7 @@ class HongjunGateway:
                             platform_chat_id,
                             approved_op=_round > 0 and _pending_approval_id or None,
                             step_callback=step_callback,
+                            conversation_history=session.get_messages(),
                         )
 
                     result = await loop.run_in_executor(None, run_orchestrator)

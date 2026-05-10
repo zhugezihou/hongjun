@@ -37,6 +37,11 @@ _step_callback_var: ContextVar[Optional[callable]] = ContextVar(
     "_step_callback", default=None
 )
 
+# ── Conversation history context var ─────────────────────────────────────────
+_conversation_history_var: ContextVar[Optional[list[dict]]] = ContextVar(
+    "_conversation_history", default=None
+)
+
 
 def _emit_step(step_type: str, step_data: dict) -> None:
     """在当前 context 中发射步骤事件（若 callback 已设置）。"""
@@ -1198,11 +1203,14 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
 
                 elif intent == "conversation":
                     try:
-                        skill_result = _llm_call(
-                            [{"role": "user", "content": req}],
-                            state,
-                            intent_type="conversation",
-                        )
+                        history = _conversation_history_var.get() or []
+                        if history:
+                            # 复用会话历史（最后一条通常是当前消息，追加到末尾）
+                            msgs = list(history)
+                            msgs.append({"role": "user", "content": req})
+                        else:
+                            msgs = [{"role": "user", "content": req}]
+                        skill_result = _llm_call(msgs, state, intent_type="conversation")
                     except Exception as e:
                         skill_result = f"[错误] 对话失败：{e}"
 
@@ -1212,11 +1220,13 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
         # ── 如果没有任何结果 → 直接走 conversation（通用问答）──
         if not skill_result:
             try:
-                skill_result = _llm_call(
-                    [{"role": "user", "content": state["user_request"]}],
-                    state,
-                    intent_type="conversation",
-                )
+                history = _conversation_history_var.get() or []
+                if history:
+                    msgs = list(history)
+                    msgs.append({"role": "user", "content": state["user_request"]})
+                else:
+                    msgs = [{"role": "user", "content": state["user_request"]}]
+                skill_result = _llm_call(msgs, state, intent_type="conversation")
             except Exception as e:
                 skill_result = ""
 
@@ -1327,6 +1337,7 @@ def process_request(
     user_id: Optional[str] = None,
     approved_op: Optional[str] = None,
     step_callback: Optional[callable] = None,
+    conversation_history: Optional[list[dict]] = None,
 ) -> str:
     """
     外部调用的同步接口
@@ -1334,17 +1345,15 @@ def process_request(
     接收用户请求，返回处理结果。
 
     Args:
-        approved_op: 已批准的 operation id（二次调用时传入，跳过危险操作预检）
-                     若此 id 在 server._APPROVED_OPS 中，则该操作已获批准，直接执行。
+        approved_op: 已批准的操作 id（二次调用时传入，跳过危险操作预检）
+            若此 id 在 server._APPROVED_OPS 中，则该操作已获批准，直接执行。
         step_callback: 可选的步骤回调，签名: callback(step_type, step_data)
-                       step_type: "intent" | "task_start" | "task_done" | "final"
-                       step_data: dict with step details
-                       注意：回调在同步线程中调用，不能执行 async 操作。
-
-    用法：
-        response = process_request("帮我搜索 GitHub 今天的 AI 趋势", user_id="皇上")
+            step_type: intent | task_start | task_done | final
+            step_data: dict with step details
+            注意：回调在同步线程中调用，不能执行 async 操作。
+        conversation_history: 对话历史消息列表，用于 conversation intent 时的上下文注入。
     """
-    # 避免循环导入，仅在需要时引用 server 模块
+    # 避免循环导入
     _approved_ops: dict = {}
     try:
         from hongjun.gateway import server as _srv
@@ -1375,12 +1384,14 @@ def process_request(
     except Exception:
         initial_state["_strategy"] = {}
 
-    # 使用 ContextVar 传递 step_callback（避免 LangGraph TypedDict 验证过滤）
-    token = _step_callback_var.set(step_callback)
+    # 使用 ContextVar 传递 step_callback 和 conversation_history
+    token_cb = _step_callback_var.set(step_callback)
+    token_hist = _conversation_history_var.set(conversation_history or [])
     try:
         final_state = coordinator_graph.invoke(initial_state)
     finally:
-        _step_callback_var.reset(token)
+        _step_callback_var.reset(token_cb)
+        _conversation_history_var.reset(token_hist)
 
     response = final_state.get("final_response", "处理异常，无返回。")
 
