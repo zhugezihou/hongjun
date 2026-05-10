@@ -1,0 +1,57 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+gateway_stdout.log
+gateway_stderr.log
+
+# Databases
+db/*.db
+db/*.sqlite3
+data/*.db
+data/*.sqlite3
+data/**/*.db
+data/**/*.sqlite3
+
+# Memory / palace data
+data/palace/
+data/palace_*/
+data/palace_default/
+data/memory*.db
+
+# Temp files
+*.tmp
+*.bak
+*.cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (local overrides)
+config/local*.yaml
+config/secrets.yaml

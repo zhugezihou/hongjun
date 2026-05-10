@@ -1,0 +1,40 @@
+[Unit]
+Description=鸿钧 · 六部尚书协同 AI Agent 系统
+Documentation=https://github.com/YOUR_ORG/hongjun
+After=network.target six-ministries-a2a.service
+Wants=six-ministries-a2a.service
+
+[Service]
+Type=simple
+User=asus
+WorkingDirectory=/home/asus/hongjun
+Environment="PATH=/home/asus/.hermes/hermes-agent/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="PYTHONPATH=/home/asus/hongjun/src"
+# API Keys（确保环境变量注入）
+EnvironmentFile=/home/asus/hongjun/.env
+
+# 启动命令
+ExecStart=/home/asus/.hermes/hermes-agent/venv/bin/python3 src/hongjun.py
+
+# 重启策略
+Restart=on-failure
+RestartSec=5
+RestartLimit=3
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hongjun
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/asus/hongjun/data /tmp
+
+# 资源限制
+MemoryMax=2G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""
+鸿钧 MCP Server 启动脚本
+=========================
+
+以独立进程方式启动鸿钧 MCP 服务器。
+
+用法：
+    # stdio 模式（Claude Desktop 原生支持）
+    python scripts/hongjun-mcp
+
+    # HTTP 模式（供远程 MCP 客户端）
+    python scripts/hongjun-mcp --http --port 20831
+
+    # SSE 模式
+    python scripts/hongjun-mcp --sse --host 0.0.0.0 --port 20831
+
+MCP 服务器 URI：
+    stdio  : 直接启动，供本地 MCP 客户端通过 stdio 连接
+    HTTP   : http://localhost:20831/mcp
+    SSE    : http://localhost:20831/sse
+"""
+
+import sys
+import os
+import argparse
+import asyncio
+
+# 确保 src 在路径中
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from hongjun.protocol import create_mcp_server
+
+
+def main():
+    parser = argparse.ArgumentParser(description="启动鸿钧 MCP 服务器")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http", "sse"],
+        default="stdio",
+        help="传输方式：stdio（默认）/ http / sse",
+    )
+    parser.add_argument("--host", default="localhost", help="HTTP/SSE 监听地址")
+    parser.add_argument("--port", type=int, default=20831, help="HTTP/SSE 监听端口")
+    parser.add_argument("--path", default="/mcp", help="HTTP 路径（默认 /mcp）")
+    args = parser.parse_args()
+
+    server = create_mcp_server()
+
+    if args.transport == "stdio":
+        print("[MCP] Starting Hongjun MCP server (stdio)...", file=sys.stderr)
+        server.run_stdio()
+
+    elif args.transport == "http":
+        print(f"[MCP] Starting Hongjun MCP server (HTTP) at http://{args.host}:{args.port}{args.path}", file=sys.stderr)
+        asyncio.run(server.run_streamable_http_async(host=args.host, port=args.port, path=args.path))
+
+    elif args.transport == "sse":
+        print(f"[MCP] Starting Hongjun MCP server (SSE) at http://{args.host}:{args.port}", file=sys.stderr)
+        asyncio.run(server.run_sse_async(host=args.host, port=args.port))
+
+
+if __name__ == "__main__":
+    main()

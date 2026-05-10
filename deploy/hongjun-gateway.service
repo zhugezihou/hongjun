@@ -1,0 +1,20 @@
+[Unit]
+Description=鸿钧 Agent Gateway
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=asus
+WorkingDirectory=/home/asus/hongjun
+Environment="PYTHONPATH=/home/asus/hongjun/src"
+ExecStart=/home/asus/.hermes/hermes-agent/venv/bin/python3 /home/asus/hongjun/src/hongjun/gateway/__main__.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=10
+ExecStop=/bin/kill -TERM $MAINPID
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""
+鸿钧 Cron CLI
+=============
+
+用法：
+    hongjun-cron list                    # 列出所有任务
+    hongjun-cron create [options]        # 创建任务
+    hongjun-cron delete <job_id>         # 删除任务
+    hongjun-cron enable <job_id>         # 启用
+    hongjun-cron disable <job_id>         # 禁用
+    hongjun-cron trigger <job_id>        # 手动触发
+    hongjun-cron history <job_id>        # 查看执行历史
+    hongjun-cron status                  # 查看调度器状态
+    hongjun-cron start                   # 启动调度器
+    hongjun-cron stop                    # 停止调度器
+
+示例：
+    hongjun-cron create \\
+        --name "六部健康检查" \\
+        --schedule interval --value 30m \\
+        --target a2a --to-agent main \\
+        --message "六部健康检查"
+
+    hongjun-cron create \\
+        --name "每日汇总" \\
+        --schedule cron --value "0 9 * * *" \\
+        --target webhook --to-url "https://example.com/webhook" \\
+        --message '{"event":"daily_summary"}'
+"""
+
+import sys
+import argparse
+import json
+from datetime import datetime
+
+sys.path.insert(0, "/home/asus/hongjun/src")
+
+from hongjun_cron import CronManager
+from hongjun_cron.models import CronScheduleType, CronTargetType
+
+
+def _fmt_job(j):
+    next_run = j.next_run_at or "—"
+    if next_run and not next_run.startswith("1970"):
+        try:
+            dt = datetime.fromisoformat(next_run)
+            next_run = dt.strftime("%m-%d %H:%M")
+        except Exception:
+            pass
+    enabled = "✅" if j.enabled else "❌"
+    return {
+        "id": j.id,
+        "name": j.name,
+        "enabled": enabled,
+        "status": j.status.value,
+        "schedule": f"{j.schedule_type.value} {j.schedule_value}",
+        "target": f"{j.target_type.value}:{j.target_id}",
+        "next_run": next_run,
+        "run_count": j.run_count,
+    }
+
+
+def cmd_list(manager: CronManager, args):
+    # --all: 显示全部; 无 --all: 只显示活跃任务
+    enabled = None if args.all else True
+    jobs = manager.list_jobs(enabled=enabled)
+    if not jobs:
+        print("无定时任务。")
+        return
+    print(f"\n{'='*70}")
+    for j in jobs:
+        f = _fmt_job(j)
+        print(f"  [{f['id']}] {f['name']}")
+        print(f"         状态: {f['status']} {f['enabled']} | 调度: {f['schedule']}")
+        print(f"         目标: {f['target']}")
+        print(f"         下次: {f['next_run']} | 累计执行: {f['run_count']} 次")
+        print()
+
+
+def cmd_create(manager: CronManager, args):
+    job = manager.create_job(
+        name=args.name,
+        schedule_type=args.schedule,
+        schedule_value=args.value,
+        target_type=args.target,
+        target_id=args.to_agent if args.target == "a2a" else args.to_url,
+        target_message=args.message,
+        description=args.description or "",
+        priority=args.priority,
+        max_retries=args.max_retries,
+        enabled=not args.disabled,
+        creator="cli",
+    )
+    print(f"✅ 任务已创建: {job.id}")
+    print(f"   名称: {job.name}")
+    print(f"   调度: {job.schedule_type.value} {job.schedule_value}")
+    print(f"   目标: {job.target_type.value}:{job.target_id}")
+    if job.next_run_at:
+        print(f"   下次执行: {job.next_run_at}")
+
+
+def cmd_delete(manager: CronManager, args):
+    job = manager.get_job(args.job_id)
+    if not job:
+        print(f"❌ 任务不存在: {args.job_id}")
+        return 1
+    ok = manager.delete_job(args.job_id)
+    print(f"{'✅' if ok else '❌'} 任务已删除: {args.job_id}")
+
+
+def cmd_enable(manager: CronManager, args):
+    job = manager.enable_job(args.job_id)
+    if not job:
+        print(f"❌ 任务不存在: {args.job_id}")
+        return 1
+    print(f"✅ 已启用: {job.name} (下次: {job.next_run_at})")
+
+
+def cmd_disable(manager: CronManager, args):
+    job = manager.disable_job(args.job_id)
+    if not job:
+        print(f"❌ 任务不存在: {args.job_id}")
+        return 1
+    print(f"✅ 已禁用: {job.name}")
+
+
+def cmd_trigger(manager: CronManager, args):
+    ok = manager.trigger_job(args.job_id)
+    print(f"{'✅' if ok else '❌'} 任务已触发: {args.job_id}")
+
+
+def cmd_history(manager: CronManager, args):
+    runs = manager.get_history(args.job_id, limit=args.limit)
+    job = manager.get_job(args.job_id)
+    print(f"\n=== {job.name if job else args.job_id} 执行历史 ===\n")
+    if not runs:
+        print("无执行记录。")
+        return
+    for r in runs:
+        status_icon = {"success": "✅", "failed": "❌", "timeout": "⏱"}.get(r.status, "❓")
+        print(f"  {status_icon} [{r.started_at[:19]}] exit={r.exit_code}  {r.result or ''}")
+
+
+def cmd_status(manager: CronManager):
+    s = manager.status()
+    print(f"\n{'='*50}")
+    print(f"  鸿钧 Cron 调度器")
+    print(f"{'='*50}")
+    sch = s["scheduler"]
+    print(f"\n调度器：{'🟢 运行中' if sch['running'] else '🔴 已停止'}")
+    print(f"  扫描次数：{sch['tick_count']}")
+    print(f"  已派发任务：{sch['jobs_dispatched']}")
+    j = s["jobs"]
+    print(f"\n任务统计：")
+    print(f"  总数：{j['total']}  |  活跃：{j['active']}  |  暂停：{j['paused']}  |  完成：{j['completed']}")
+
+
+def cmd_start(manager: CronManager):
+    manager.start()
+    print("✅ 调度器已启动")
+
+
+def cmd_stop(manager: CronManager):
+    manager.stop()
+    print("✅ 调度器已停止")
+
+
+def main():
+    manager = CronManager()
+
+    parser = argparse.ArgumentParser(description="鸿钧 Cron 管理")
+    sub = parser.add_subparsers(dest="cmd")
+
+    # list
+    lst = sub.add_parser("list", help="列出所有任务")
+    lst.add_argument("--all", action="store_true", help="包含禁用的任务")
+
+    # create
+    c = sub.add_parser("create", help="创建定时任务")
+    c.add_argument("--name", required=True, help="任务名称")
+    c.add_argument("--schedule", required=True, choices=["cron", "interval", "once"], help="调度类型")
+    c.add_argument("--value", required=True, help="调度值（cron 表达式 / 间隔 / ISO 时间）")
+    c.add_argument("--target", required=True, choices=["a2a", "webhook"], help="目标类型")
+    c.add_argument("--to-agent", dest="to_agent", help="A2A 目标 Agent ID")
+    c.add_argument("--to-url", dest="to_url", help="Webhook URL")
+    c.add_argument("--message", required=True, help="发送的消息或 POST 内容")
+    c.add_argument("--description", dest="description", help="任务描述")
+    c.add_argument("--priority", default="normal", choices=["high", "normal", "low"])
+    c.add_argument("--max-retries", type=int, default=3)
+    c.add_argument("--disabled", action="store_true", help="创建后禁用")
+
+    # delete
+    sub.add_parser("delete", help="删除任务").add_argument("job_id")
+
+    # enable
+    sub.add_parser("enable", help="启用任务").add_argument("job_id")
+
+    # disable
+    sub.add_parser("disable", help="禁用任务").add_argument("job_id")
+
+    # trigger
+    sub.add_parser("trigger", help="手动触发任务").add_argument("job_id")
+
+    # history
+    h = sub.add_parser("history", help="查看执行历史")
+    h.add_argument("job_id")
+    h.add_argument("--limit", type=int, default=20)
+
+    # status
+    sub.add_parser("status", help="查看调度器状态")
+
+    # start / stop
+    sub.add_parser("start", help="启动调度器")
+    sub.add_parser("stop", help="停止调度器")
+
+    args = parser.parse_args()
+
+    if args.cmd == "list":
+        cmd_list(manager, args)
+    elif args.cmd == "create":
+        return cmd_create(manager, args)
+    elif args.cmd == "delete":
+        return cmd_delete(manager, args)
+    elif args.cmd == "enable":
+        return cmd_enable(manager, args)
+    elif args.cmd == "disable":
+        return cmd_disable(manager, args)
+    elif args.cmd == "trigger":
+        return cmd_trigger(manager, args)
+    elif args.cmd == "history":
+        cmd_history(manager, args)
+    elif args.cmd == "status":
+        cmd_status(manager)
+    elif args.cmd == "start":
+        cmd_start(manager)
+    elif args.cmd == "stop":
+        cmd_stop(manager)
+    else:
+        parser.print_help()
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

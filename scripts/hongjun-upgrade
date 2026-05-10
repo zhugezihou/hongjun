@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""
+鸿钧升级管理 CLI
+================
+
+用法：
+    hongjun-upgrade status              # 查看当前状态
+    hongjun-upgrade upgrade [options]   # 升级
+    hongjun-upgrade repair               # 修复
+    hongjun-upgrade rollback [path]      # 回滚
+    hongjun-upgrade uninstall [--all]    # 卸载
+    hongjun-upgrade changelog            # 查看变更日志
+
+示例：
+    hongjun-upgrade upgrade --bump minor --changelog "新增 A2A 路由功能"
+    hongjun-upgrade upgrade --to 1.3.0 --changelog "安全漏洞修复"
+    hongjun-upgrade repair
+    hongjun-upgrade rollback
+    hongjun-upgrade uninstall --all    # 删除所有数据
+"""
+
+import sys
+import argparse
+import json
+
+sys.path.insert(0, "/home/asus/hongjun/src")
+
+from hongjun_upgrader import HongjunUpgrader
+from hongjun_upgrader.version import parse_version
+
+
+def cmd_status(upgrader: HongjunUpgrader):
+    s = upgrader.status()
+    print(f"\n{'='*50}")
+    print(f"  鸿钧升级系统 v{s['current_version'] or '未知'}")
+    print(f"{'='*50}")
+    print(f"\n当前版本：{s['current_version'] or '未知'}")
+    print(f"\n受保护目录（升级不触及）：")
+    for name, path in s["protected_zones"].items():
+        print(f"  {name:12s} → {path}")
+    print(f"\n可升级目录：")
+    for d in s["upgradable_dirs"]:
+        print(f"  {d}")
+    print(f"\n最近升级：")
+    lu = s["last_upgrade"]
+    if lu:
+        print(f"  [{lu.get('time','?')}] {lu.get('action','?')} {lu.get('detail','')}")
+    else:
+        print("  无记录")
+    print(f"\n可用备份：{len(s['available_backups'])} 个")
+    for b in s["available_backups"][:5]:
+        print(f"  {b}")
+    if s["changelog"]:
+        print(f"\n--- 最近变更 ---")
+        lines = s["changelog"].strip().split("\n")
+        print("\n".join(lines[-20:]))
+    print()
+
+
+def cmd_upgrade(upgrader: HongjunUpgrader, args):
+    check = upgrader.pre_upgrade_check()
+    if not check["healthy"]:
+        print(f"❌ 前置检查失败：{check['issues']}")
+        if check["warnings"]:
+            print(f"⚠ 警告：{check['warnings']}")
+        return 1
+
+    result = upgrader.upgrade(
+        target_version=args.to,
+        changelog=args.changelog or "",
+        bump=args.bump,
+        dry_run=args.dry_run,
+    )
+
+    ok = "✅" if result["success"] else "❌"
+    print(f"\n{ok} {result['detail']}")
+    if result.get("backup"):
+        print(f"   备份：{result['backup']}")
+    if result.get("level"):
+        print(f"   级别：{result['level']}")
+    return 0 if result["success"] else 1
+
+
+def cmd_repair(upgrader: HongjunUpgrader):
+    result = upgrader.repair()
+    ok = "✅" if result["success"] else "⚠️"
+    print(f"\n{ok} 修复结果：{result['detail']}")
+    if result.get("repaired"):
+        print(f"   已修复：{result['repaired']}")
+    if result.get("failed"):
+        print(f"   失败：{result['failed']}")
+    return 0 if result["success"] else 1
+
+
+def cmd_rollback(upgrader: HongjunUpgrader, args):
+    from pathlib import Path
+    backup = Path(args.backup) if args.backup else None
+    result = upgrader.rollback(backup)
+    ok = "✅" if result["success"] else "❌"
+    print(f"\n{ok} {result['detail']}")
+    return 0 if result["success"] else 1
+
+
+def cmd_uninstall(upgrader: HongjunUpgrader, args):
+    keep = not args.all
+    confirm = input(f"确认卸载鸿钧{'（保留用户数据）' if keep else '（删除所有数据）'}？[y/N]: ")
+    if confirm.strip().lower() != "y":
+        print("取消。")
+        return 0
+    result = upgrader.uninstall(keep_data=keep)
+    print(f"\n✅ {result['detail']}")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="鸿钧升级管理")
+    sub = parser.add_subparsers(dest="cmd")
+
+    # status
+    sub.add_parser("status", help="查看当前状态")
+
+    # upgrade
+    up = sub.add_parser("upgrade", help="升级")
+    up.add_argument("--to", dest="to", help="目标版本（如 1.3.0）")
+    up.add_argument("--bump", choices=["major", "minor", "patch"], help="版本递增级别")
+    up.add_argument("--changelog", "-m", help="变更说明")
+    up.add_argument("--dry-run", action="store_true", help="仅检查不执行")
+
+    # repair
+    sub.add_parser("repair", help="修复（检查并修复损坏的核心文件）")
+
+    # rollback
+    rb = sub.add_parser("rollback", help="回滚")
+    rb.add_argument("backup", nargs="?", help="备份文件路径（省略则用最新）")
+
+    # uninstall
+    un = sub.add_parser("uninstall", help="卸载")
+    un.add_argument("--all", action="store_true", help="删除所有数据（包括用户数据）")
+
+    args = parser.parse_args()
+
+    upgrader = HongjunUpgrader()
+
+    if args.cmd == "status":
+        cmd_status(upgrader)
+    elif args.cmd == "upgrade":
+        return cmd_upgrade(upgrader, args)
+    elif args.cmd == "repair":
+        return cmd_repair(upgrader)
+    elif args.cmd == "rollback":
+        return cmd_rollback(upgrader, args)
+    elif args.cmd == "uninstall":
+        return cmd_uninstall(upgrader, args)
+    else:
+        parser.print_help()
+        return 0
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

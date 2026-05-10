@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""
+鸿钧 CLI
+
+用法：
+  hongjun start          启动 Gateway
+  hongjun stop           停止 Gateway
+  hongjun status         查看状态
+  hongjun chat "消息"    发送消息
+  hongjun sessions       列出所有会话
+  hongjun tail           实时日志（journalctl）
+"""
+
+import argparse
+import json
+import subprocess
+import sys
+import urllib.request
+import urllib.error
+
+GATEWAY_URL = "http://localhost:20830"
+
+
+def api(path: str, method: str = "GET", data: dict = None) -> dict:
+    url = f"{GATEWAY_URL}{path}"
+    kwargs: dict = {}
+    if data:
+        kwargs["data"] = json.dumps(data).encode()
+        kwargs["headers"] = {"Content-Type": "application/json"}
+    req = urllib.request.Request(url=url, method=method, **kwargs)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"HTTP {e.code}: {body}")
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"❌ 无法连接 Gateway ({e.reason})")
+        print("   确认 Gateway 已启动：hongjun start")
+        sys.exit(1)
+
+
+def cmd_start():
+    # 启动 systemd 服务（如果可用）或者直接启动
+    result = subprocess.run(
+        ["systemctl", "--user", "is-active", "hongjun-gateway.service"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0 and "active" in result.stdout:
+        print("✅ hongjun-gateway.service 已经在运行")
+        return
+
+    # 尝试直接启动
+    print("🚀 启动鸿钧 Gateway...")
+    proc = subprocess.Popen(
+        [
+            sys.executable, "-c", f"""
+import sys, asyncio, logging
+sys.path.insert(0, '/home/asus/hongjun/src')
+logging.basicConfig(level=logging.INFO, format='%(name)s %(message)s')
+async def main():
+    from hongjun.gateway.server import HongjunGateway
+    g = HongjunGateway(port=20830)
+    await g.start()
+    await asyncio.Event().wait()
+asyncio.run(main())
+"""
+        ],
+        cwd="/home/asus/hongjun",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print(f"✅ Gateway 已启动 (PID: {proc.pid})")
+    print(f"   Gateway URL: {GATEWAY_URL}")
+    print("   启动完成，进程在后台运行")
+
+
+def cmd_stop():
+    try:
+        r = api("/shutdown", "POST")
+        print("✅ Gateway 关闭中")
+    except Exception:
+        # 进程可能不在，尝试杀进程
+        subprocess.run(["pkill", "-f", "hongjun.gateway"], capture_output=True)
+        print("✅ 进程已终止")
+
+
+def cmd_status():
+    data = api("/status")
+    print(f"鸿钧 Gateway 状态")
+    print(f"  版本:   {data['version']}")
+    print(f"  端口:   {data['port']}")
+    print(f"  状态:   {data['status']}")
+    print(f"  启动:   {data['uptime']}")
+    print(f"  请求:   {data['total_requests']} 次")
+    print(f"  平均延迟: {data['avg_latency_s']}s")
+    print(f"  并发槽: {data['queue']['active_count']}/{data['queue']['max_concurrent']}")
+    print(f"  活跃会话: {len(data['active_sessions'])}")
+
+
+def cmd_chat(msg: str):
+    data = api("/chat", "POST", {"message": msg})
+    print(f"\n👤 用户: {msg}")
+    print(f"\n🤖 鸿钧: {data['response']}")
+    print(f"\n   session={data['session_id'][:8]}... "
+          f"state={data['state']} msg={data['message_count']} "
+          f"latency={data.get('latency_s', '?')}s")
+
+
+def cmd_sessions():
+    data = api("/sessions")
+    sessions = data["sessions"]
+    if not sessions:
+        print("暂无会话")
+        return
+    print(f"共 {len(sessions)} 个会话：")
+    for s in sessions:
+        print(f"  {s['id'][:8]}... | {s['state']:10} | "
+              f"msgs={s['message_count']:3} | {s['platform']}")
+
+
+def cmd_metrics():
+    data = api("/metrics")
+    print(f"请求数: {data['request_count']}")
+    print(f"平均延迟: {data['avg_latency_s']}s")
+    print(f"会话状态: {data['sessions_by_state']}")
+    print(f"总会话: {data['total_sessions']}")
+    print(f"队列: {data['queue']}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="鸿钧 CLI")
+    sub = parser.add_subparsers(dest="cmd")
+
+    sub.add_parser("start", help="启动 Gateway")
+    sub.add_parser("stop", help="停止 Gateway")
+    sub.add_parser("status", help="查看状态")
+    sub.add_parser("sessions", help="列出所有会话")
+    sub.add_parser("metrics", help="性能指标")
+    sub.add_parser("tail", help="实时日志")
+
+    chat = sub.add_parser("chat", help="发送消息")
+    chat.add_argument("message", help="消息内容")
+
+    args = parser.parse_args()
+
+    if args.cmd == "start":
+        cmd_start()
+    elif args.cmd == "stop":
+        cmd_stop()
+    elif args.cmd == "status":
+        cmd_status()
+    elif args.cmd == "chat":
+        cmd_chat(args.message)
+    elif args.cmd == "sessions":
+        cmd_sessions()
+    elif args.cmd == "metrics":
+        cmd_metrics()
+    elif args.cmd == "tail":
+        subprocess.run([
+            "journalctl", "--user", "-f", "-n", "50",
+            "-t", "python3", "-g", "hongjun", "--no-pager"
+        ])
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

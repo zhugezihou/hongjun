@@ -1,0 +1,136 @@
+# 鸿钧 · 配置文件
+# =================
+# 六部尚书协同系统配置
+
+# === 全局配置 ===
+hongjun:
+  version: "0.1.0"
+  name: "鸿钧"
+  description: "六部尚书协同的超强 AI Agent 系统"
+
+  # LLM 配置
+  llm:
+    provider: "openai"           # openai / anthropic / ollama
+    model: "gpt-4o"
+    temperature: 0.3
+    max_tokens: 4096
+    # api_key: "sk-..."         # 建议使用环境变量 OPENAI_API_KEY
+
+  # 日志级别
+  log_level: "INFO"             # DEBUG / INFO / WARNING / ERROR
+
+# === A2A 端口分配 ===
+a2a:
+  ports:
+    吏部: 20020   # 协调中心
+    工部: 20021   # 执行引擎
+    户部: 20022   # 记忆系统
+    礼部: 20023   # 工具层
+    兵部: 20024   # 安全护栏
+    刑部: 20025   # 评测体系
+
+  # 心跳间隔（秒）
+  heartbeat_interval: 30
+
+# === 各部配置 ===
+
+# 工部·执行引擎
+executor:
+  timeout_seconds: 60
+  max_retries: 2
+  allowed_commands:
+    - "ls"
+    - "cat"
+    - "grep"
+    - "python"
+    - "git"
+    - "curl"
+  blocked_commands:
+    - "rm -rf /"
+    - "mkfs"
+    - ":(){ :|:& };:"
+  sandbox_path: "/home/asus/hongjun/sandbox"
+
+# 户部·记忆系统
+memory:
+  enabled: true
+  backend: "sqlite"             # sqlite / mempalace / chroma
+  palace_path: "/home/asus/hongjun/data/palace"
+  db_path: "/home/asus/hongjun/data/memory.db"
+  max_memories: 1000            # 最大记忆条数
+  importance_threshold: 0.3     # 低于此重要性的记忆不存储
+
+# 礼部·工具层
+tools:
+  enabled: true
+  registry:
+    - name: "shell"
+      enabled: true
+    - name: "browser"
+      enabled: true
+      headless: true
+    - name: "search"
+      enabled: true
+      provider: "tavily"         # tavily / jina / brave
+    - name: "file_read"
+      enabled: true
+    - name: "file_write"
+      enabled: true
+      allowed_paths:
+        - "/home/asus/hongjun/"
+
+  # API Keys（建议使用环境变量）
+  # ⚠️  必须配置 Tavily API Key（https://tavily.com FREE tier 1000次/天）
+  #     export TAVILY_API_KEY=tvly-xxxxx
+  tavily_api_key: "${TAVILY_API_KEY}"
+  jina_api_key: "${JINA_API_KEY}"
+
+# 兵部·安全护栏
+security:
+  enabled: true
+  guardrails: "nemo"            # nemo / lightweight
+  nemo_config_path: "/home/asus/hongjun/config/guardrails"
+
+  # 输入过滤
+  input:
+    max_length: 50000
+    block_patterns:
+      - "rm -rf /"
+      - "rm -rf /*"
+      - "drop table"
+      - "format c:"
+    block_topics:
+      - "如何制作炸弹"
+      - "如何制造毒品"
+
+  # 输出过滤
+  output:
+    block_sensitive: true
+    max_length: 100000
+
+  # 权限级别
+  default_permission: "USER"     # GUEST / USER / ADMIN
+
+# 刑部·评测体系
+evaluation:
+  enabled: true
+  auto_eval: true               # 每次请求后自动评测
+  score_threshold: 0.7           # 低于此分数给出警告
+
+  dimensions:
+    correctness: 0.25
+    completeness: 0.25
+    security: 0.20
+    performance: 0.15
+    clarity: 0.15
+
+# === Web 服务配置 ===
+server:
+  host: "0.0.0.0"
+  port: 20030
+  cors_enabled: false
+
+# === 开发配置 ===
+dev:
+  mock_mode: false              # 模拟模式（不调用真实 LLM）
+  verbose_logging: false        # 详细日志

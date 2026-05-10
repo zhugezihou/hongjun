@@ -1,0 +1,99 @@
+# 鸿钧 · Docker Compose
+# ======================
+#
+# 包含：
+#   - 六部 A2A Server（six-ministries-a2a）
+#   - 鸿钧主系统（hongjun）
+#
+# 用法：
+#   # 开发模式（前台运行）
+#   docker compose up
+#
+#   # 生产模式（后台运行）
+#   docker compose up -d
+#
+#   # 查看日志
+#   docker compose logs -f hongjun
+#
+#   # 停止
+#   docker compose down
+#
+#   # 重新构建
+#   docker compose up -d --build
+
+services:
+
+  # === 六部 A2A Server ===
+
+  six-ministries-a2a:
+    image: hongjun/six-ministries:latest
+    container_name: hongjun-six-ministries
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.six-ministries
+    ports:
+      - "20002:20002"   # 工部
+      - "20003:20003"   # 户部
+      - "20004:20004"   # 礼部
+      - "20005:20005"   # 兵部
+      - "20006:20006"   # 刑部
+      - "20007:20007"   # 吏部
+    volumes:
+      - hongjun-data:/app/data
+      - /home/asus/.openclaw:/home/asus/.openclaw:ro
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:20002/.well-known/agent-card"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - hongjun-net
+
+  # === 鸿钧主系统 ===
+
+  hongjun:
+    image: hongjun/hongjun:latest
+    container_name: hongjun-main
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8000:8000"     # 鸿钧 HTTP API（如有）
+      - "20099:20099"   # 状态聚合 API
+    volumes:
+      - hongjun-data:/app/data
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HONGJUN_MODE=production
+      - SIX_MINISTRIES_URL=http://six-ministries-a2a:20002
+    depends_on:
+      six-ministries-a2a:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - hongjun-net
+
+  # === 监控（可选） ===
+
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: hongjun-prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+  #   networks:
+  #     - hongjun-net
+
+volumes:
+  hongjun-data:
+    driver: local
+
+networks:
+  hongjun-net:
+    driver: bridge
