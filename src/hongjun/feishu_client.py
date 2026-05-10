@@ -16,6 +16,7 @@ import re
 import time
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -24,19 +25,28 @@ from hongjun.logging_config import get_logger
 
 logger = get_logger("hongjun.feishu")
 
-# ── 配置加载（迁移到 hongjun.config）───────────────────────────────
+# ── 配置加载（鸿钧独立配置）───────────────────────────────
+
+_HONGJUN_CONFIG_PATH = Path.home() / ".config" / "hongjun" / "config.yaml"
+
 
 def _load_feishu_config() -> tuple[str, str]:
     """
-    从 hongjun.config 读取飞书凭证。
-    保留函数签名以兼容直接调用，内部委托给 get_feishu_credentials()。
+    直接读取 ~/.config/hongjun/config.yaml 中的飞书凭证。
+    不依赖 hermes 配置，完全独立。
     """
-    try:
-        from hongjun.config import get_feishu_credentials
-        return get_feishu_credentials()
-    except ValueError:
-        # 回退到环境变量（最终兜底）
-        return os.environ.get("FEISHU_APP_ID", ""), os.environ.get("FEISHU_APP_SECRET", "")
+    path = _HONGJUN_CONFIG_PATH
+    if path.exists():
+        import yaml as _yaml
+
+        with open(path, encoding="utf-8") as f:
+            data = _yaml.safe_load(f) or {}
+        feishu = data.get("feishu", {}) or {}
+        app_id = feishu.get("app_id", "") or ""
+        app_secret = feishu.get("app_secret", "") or ""
+        if app_id and app_secret:
+            return app_id, app_secret
+    return "", ""
 
 
 # ── 飞书 API ─────────────────────────────────────────────────────
@@ -46,7 +56,7 @@ LARKOO2_BASE = "https://lark-oapi2.feishu.cn/open-apis"  # oapi2 (oauth2)
 
 # Bot 凭证（优先从 ~/.hermes/config.yaml 读取）
 _app_id, _app_secret = _load_feishu_config()
-APP_ID = _app_id or os.environ.get("FEISHU_APP_ID", "cli_a9334eb4cef85ccd")
+APP_ID = _app_id or os.environ.get("FEISHU_APP_ID", "")
 APP_SECRET = _app_secret or os.environ.get("FEISHU_APP_SECRET", "")
 
 # 朝堂群
@@ -571,10 +581,18 @@ class FeishuWebSocketHandler:
                 if not clean_text:
                     return
 
-                # 异步转发到 gateway（在已有 event loop 中调度任务）
-                asyncio.get_running_loop().create_task(
-                    self._forward_to_gateway(clean_text, msg_id, msg_obj.message.chat_id)
-                )
+                # 在线程池中异步转发到 gateway（避免 event loop 阻塞问题）
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.run_in_executor(
+                        None,
+                        lambda: asyncio.run(
+                            self._forward_to_gateway(clean_text, msg_id, msg_obj.message.chat_id)
+                        ),
+                    )
+                    logger.info("ws_forward_scheduled", text=clean_text[:30], msg_id=msg_id[:20])
+                except Exception as e:
+                    logger.error("ws_forward_executor_error", error=str(e))
 
             except Exception as e:
                 logger.error("ws_msg_process_error", error=str(e))
