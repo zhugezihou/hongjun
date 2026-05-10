@@ -275,7 +275,7 @@ class EvolutionMemory:
     # ── 自动调用钩子 ──────────────────────────────────────────────
 
     def on_task_complete(self, request: str, result: str, intent: str = "", execution_time: float = 0):
-        """任务完成时自动调用"""
+        """任务完成时自动调用：记录成功 + 触发反思"""
         self.record_success(
             task=intent or request[:50],
             request=request,
@@ -283,12 +283,34 @@ class EvolutionMemory:
             execution_time=execution_time,
             intent=intent,
         )
+        # 触发反思引擎（小规模反思）
+        self._trigger_reflection(request=request, result=result, success=True)
 
     def on_task_failure(self, request: str, error: str, fix: str = ""):
-        """任务失败时自动调用"""
+        """任务失败时自动调用：记录失败 + 触发反思"""
         self.record_failure(
             task=request[:50],
             request=request,
             error=error,
             fix_applied=fix,
         )
+        # 触发反思引擎（分析失败原因）
+        self._trigger_reflection(request=request, error=error, success=False)
+
+    def _trigger_reflection(self, request: str = "", result: str = "", error: str = "", success: bool = True):
+        """
+        内部钩子：任务完成后触发反思引擎复盘。
+
+        注意：反思引擎在后台运行，不阻塞主流程。
+        """
+        try:
+            from hongjun.reflection_engine import get_reflection_engine
+            engine = get_reflection_engine()
+            engine.trigger_task_reflection(
+                request=request,
+                result=result if success else "",
+                error=error if not success else "",
+                success=success,
+            )
+        except Exception as e:
+            logger.warning(f"反思触发失败（静默，不影响主流程）: {e}")
