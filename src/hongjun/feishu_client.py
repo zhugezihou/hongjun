@@ -595,7 +595,11 @@ class FeishuWebSocketHandler:
                         if resp.status_code == 200:
                             data = resp.json()
                             reply_text = data.get("response", "（无响应）")
-                            self._reply_to_feishu(msg_id, reply_text, msg_obj.message.chat_id)
+                            loop = asyncio.get_event_loop()
+                            loop.run_until_complete(
+                                self.client.reply_text(msg_id, reply_text)
+                            )
+                            logger.info("ws_replied", text=reply_text[:80])
                     logger.info("ws_forward_scheduled", text=clean_text[:30], msg_id=msg_id[:20])
                 except Exception as e:
                     logger.error("ws_forward_error", error=str(e))
