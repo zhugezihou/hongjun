@@ -807,16 +807,18 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                                     task = task.split(prefix)[-1].strip()
                                     break
                             try:
-                                from .gateway.server import _get_llm
-                                llm = _get_llm()
-                                if llm:
-                                    code_resp = llm.chat_sync([
+                                skill_result = _llm_call(
+                                    [
                                         {"role": "system", "content": "你是一个专业的代码生成器。用户要求写代码时，直接输出代码（用markdown ```包裹），不要解释。"},
                                         {"role": "user", "content": task}
-                                    ])
-                                    skill_result = code_resp.content if hasattr(code_resp, "content") else str(code_resp)
-                                else:
-                                    skill_result = "[错误] LLM 未配置"
+                                    ],
+                                    state,
+                                    intent_type="code_generation",
+                                )
+                                if skill_result.startswith("[错误]"):
+                                    raise RuntimeError(skill_result)
+                                # 自我验证回路：生成代码后自动执行并验证结果
+                                skill_result = verify_and_execute(req, skill_result)
                             except Exception as e:
                                 skill_result = f"[错误] 代码生成失败：{e}"
 
@@ -828,15 +830,11 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                                     query = query.split(prefix)[-1].strip()
                                     break
                             try:
-                                from .gateway.server import _get_llm
-                                llm = _get_llm()
-                                if llm:
-                                    search_resp = llm.chat_sync([
-                                        {"role": "user", "content": f"请简要回答：{query}。如果需要最新信息，请基于你的知识库回答。"}
-                                    ])
-                                    skill_result = search_resp.content if hasattr(search_resp, "content") else str(search_resp)
-                                else:
-                                    skill_result = "[错误] LLM 未配置"
+                                skill_result = _llm_call(
+                                    [{"role": "user", "content": f"请简要回答：{query}。如果需要最新信息，请基于你的知识库回答。"}],
+                                    state,
+                                    intent_type="search",
+                                )
                             except Exception as e:
                                 skill_result = f"[错误] 搜索失败：{e}"
 
@@ -1071,18 +1069,18 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                             task = task.split(prefix)[-1].strip()
                             break
                     try:
-                        from .gateway.server import _get_llm
-                        llm = _get_llm()
-                        if llm:
-                            code_resp = llm.chat_sync([
+                        skill_result = _llm_call(
+                            [
                                 {"role": "system", "content": "你是一个专业的代码生成器。用户要求写代码时，直接输出代码（用markdown ```包裹），不要解释。如果涉及可视化效果（动画、游戏、图表），请生成可运行的 HTML/JS 代码。"},
                                 {"role": "user", "content": task}
-                            ])
-                            raw_code = code_resp.content if hasattr(code_resp, "content") else str(code_resp)
-                            # 自我验证回路：生成代码后自动执行并验证结果
-                            skill_result = verify_and_execute(req, raw_code)
-                        else:
-                            skill_result = "[错误] LLM 未配置"
+                            ],
+                            state,
+                            intent_type="code_generation",
+                        )
+                        if skill_result.startswith("[错误]"):
+                            raise RuntimeError(skill_result)
+                        # 自我验证回路：生成代码后自动执行并验证结果
+                        skill_result = verify_and_execute(req, skill_result)
                     except Exception as e:
                         skill_result = f"[错误] 代码生成失败：{e}"
 
@@ -1093,15 +1091,11 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                             query = query.split(prefix)[-1].strip()
                             break
                     try:
-                        from .gateway.server import _get_llm
-                        llm = _get_llm()
-                        if llm:
-                            search_resp = llm.chat_sync([
-                                {"role": "user", "content": f"请简要回答：{query}。如果需要最新信息，请基于你的知识库回答。"}
-                            ])
-                            skill_result = search_resp.content if hasattr(search_resp, "content") else str(search_resp)
-                        else:
-                            skill_result = "[错误] LLM 未配置"
+                        skill_result = _llm_call(
+                            [{"role": "user", "content": f"请简要回答：{query}。如果需要最新信息，请基于你的知识库回答。"}],
+                            state,
+                            intent_type="search",
+                        )
                     except Exception as e:
                         skill_result = f"[错误] 搜索失败：{e}"
 
@@ -1128,13 +1122,11 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
 
                 elif intent == "conversation":
                     try:
-                        from .gateway.server import _get_llm
-                        llm = _get_llm()
-                        if llm:
-                            conv_resp = llm.chat_sync([{"role": "user", "content": req}])
-                            skill_result = conv_resp.content if hasattr(conv_resp, "content") else str(conv_resp)
-                        else:
-                            skill_result = "[错误] LLM 未配置"
+                        skill_result = _llm_call(
+                            [{"role": "user", "content": req}],
+                            state,
+                            intent_type="conversation",
+                        )
                     except Exception as e:
                         skill_result = f"[错误] 对话失败：{e}"
 
