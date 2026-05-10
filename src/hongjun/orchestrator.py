@@ -24,7 +24,10 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Optional
 from enum import Enum
+from pathlib import Path
 import re
+import time
+import uuid
 
 
 class TaskType(str, Enum):
@@ -484,9 +487,9 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                     # 从请求中提取 GitHub 相关参数
                     if "trending" in req.lower() or "趋势" in req:
                         lang = "Python"
-                        for l in ["Python", "JavaScript", "Go", "Rust", "TypeScript"]:
-                            if l in req:
-                                lang = l
+                        for lang_name in ["Python", "JavaScript", "Go", "Rust", "TypeScript"]:
+                            if lang_name in req:
+                                lang = lang_name
                                 break
                         skill_result = best_skill.functions["trending"](language=lang)
                     elif "/" in req and "仓库" in req or "/" in req:

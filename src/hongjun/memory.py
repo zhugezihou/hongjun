@@ -471,8 +471,8 @@ class MemPalaceWrapper:
         result = self._run(["search", query])
         try:
             # MemPalace search 输出是 JSONL
-            lines = [l for l in result.strip().split("\n") if l]
-            return [json.loads(l) for l in lines]
+            lines = [line for line in result.strip().split("\n") if line]
+            return [json.loads(line) for line in lines]
         except json.JSONDecodeError:
             return [{"content": result, "score": 1.0}]
 

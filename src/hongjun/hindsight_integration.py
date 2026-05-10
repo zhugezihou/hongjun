@@ -30,7 +30,10 @@ from __future__ import annotations
 
 import os
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hindsight_client import Hindsight as HindsightClient
 
 from hongjun.llm import chat_sync, LLMResponse
 
