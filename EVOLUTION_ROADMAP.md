@@ -16,7 +16,7 @@
 - [x] `hongjun-daily-evolution` cron - **09:00 每日反思** ✅ 2026-05-10
 - [x] `orchestrator.py` - 集成 _llm_call（记忆注入） ✅ 2026-05-10
 
-### 阶段2：自我进化（能反思）🔨
+### 阶段2：自我进化（能反思）✅
 - [x] `error_pattern.py` - **错误模式积累：错误类型→修复方案映射** ✅ 2026-05-10
   - 内置8种常见错误模式（ImportError/GitError/TimeoutError等）
   - 每次失败自动记录，已知修复优先推荐
@@ -25,8 +25,11 @@
   - 扫描 AI agent / LangGraph / browser automation / memory system
   - 相关度评分，推送飞书朝堂群
   - 用户回复「研究 [repo]」可深入研究
-- [ ] `self_evolution.py` - 与 error_pattern 深度集成（失败即记录到库）
-- [ ] `cron/skill-discovery` - 每3天扫描一次 GitHub trending
+- [x] `self_evolution.py` - **与 error_pattern 深度集成（失败即记录到库）** ✅ 2026-05-10
+  - 验证失败时先查错误库，命中则自动应用修复
+  - LLM 修复成功后记录新错误→修复对到库
+- [x] `hongjun-skill-discovery` cron - **每周日 10:00 扫描 GitHub trending** ✅ 2026-05-10
+  - `python -m hongjun.skill_discovery --notify`
 
 ### 阶段3：持续进化（能超越）
 - [ ] `meta_learner.py` - 元学习：什么策略适合什么任务
