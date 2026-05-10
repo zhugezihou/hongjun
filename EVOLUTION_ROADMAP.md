@@ -4,7 +4,7 @@
 
 ## 阶段划分
 
-### 阶段1：夯实基础（能干活）
+### 阶段1：夯实基础（能干活）✅
 - [x] `agent.py` - 基础ReAct骨架（已存在）
 - [x] `planner.py` - **任务分解引擎（Plan-and-Execute）** ✅ 2026-05-10
 - [x] `task_executor.py` - **执行器（含交叉验证闭环）** ✅ 2026-05-10
@@ -16,10 +16,17 @@
 - [x] `hongjun-daily-evolution` cron - **09:00 每日反思** ✅ 2026-05-10
 - [x] `orchestrator.py` - 集成 _llm_call（记忆注入） ✅ 2026-05-10
 
-### 阶段2：自我进化（能反思）
-- [ ] `reflection_engine.py` - **反思引擎：定期复盘，遗忘错误经验，巩固正确经验**
-- [ ] `error_pattern.py` - 错误模式积累：错误类型→修复方案映射
-- [ ] `skill_discovery.py` - 主动技能发现：定期搜索GitHub trending
+### 阶段2：自我进化（能反思）🔨
+- [x] `error_pattern.py` - **错误模式积累：错误类型→修复方案映射** ✅ 2026-05-10
+  - 内置8种常见错误模式（ImportError/GitError/TimeoutError等）
+  - 每次失败自动记录，已知修复优先推荐
+  - `self_repair._generate_fix()` 优先查库再 LLM 生成
+- [x] `skill_discovery.py` - **主动技能发现：定期搜索GitHub trending** ✅ 2026-05-10
+  - 扫描 AI agent / LangGraph / browser automation / memory system
+  - 相关度评分，推送飞书朝堂群
+  - 用户回复「研究 [repo]」可深入研究
+- [ ] `self_evolution.py` - 与 error_pattern 深度集成（失败即记录到库）
+- [ ] `cron/skill-discovery` - 每3天扫描一次 GitHub trending
 
 ### 阶段3：持续进化（能超越）
 - [ ] `meta_learner.py` - 元学习：什么策略适合什么任务
@@ -51,3 +58,17 @@
                     ↓                    ↓
                高频访问 → 提升权重      低频访问 → 降权淘汰
 ```
+
+## 已集成模块（白名单）
+
+`self_repair.SAFE_TO_MODIFY` 中可自改的模块：
+```
+orchestrator, self_evolution, executor, tools,
+intent_classifier, skill_manager, memory,
+feishu_client, agent, evaluator, hindsight_integration,
+cli, llm, logging_config, config,
+reflection_engine, planner, task_executor, task_state,
+memory_injection, error_pattern, skill_discovery
+```
+
+受保护模块（禁止自改）：`security`, `models`

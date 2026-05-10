@@ -35,6 +35,8 @@ SAFE_TO_MODIFY = {
     "intent_classifier", "skill_manager", "memory",
     "feishu_client", "agent", "evaluator", "hindsight_integration",
     "cli", "llm", "logging_config", "config",
+    "reflection_engine", "planner", "task_executor", "task_state",
+    "memory_injection", "error_pattern", "skill_discovery",
 }
 
 # 不可自改的模块（安全关键）
@@ -241,7 +243,33 @@ class SelfRepairEngine:
     def _generate_fix(self, module_name: str, error_info: str, file_path: Path) -> Optional[dict]:
         """
         用 LLM 分析错误并生成修复方案。
+
+        优先使用已知修复库（error_pattern），找不到再 LLM 生成。
         """
+        # ── Step 1：查错误模式库 ─────────────────────────────────────
+        try:
+            from hongjun.error_pattern import get_error_library
+            lib = get_error_library()
+
+            # 提取错误类型
+            import re
+            err_type_m = re.search(r'(\w+Error|\w+Exception)', error_info)
+            error_type = err_type_m.group(1) if err_type_m else ""
+
+            known_fix = lib.lookup_by_error(error_type, error_info)
+            if known_fix:
+                logger.info(f"使用已知修复 [{known_fix.pattern_id}]: {known_fix.description}")
+                lib.record_fix_success(known_fix.pattern_id)
+                return {
+                    "description": known_fix.description,
+                    "plan": known_fix.fix_command or known_fix.fix_code or known_fix.fix_description,
+                    "from_known_pattern": True,
+                    "pattern_id": known_fix.pattern_id,
+                }
+        except Exception as e:
+            logger.warning(f"查找已知修复失败: {e}")
+
+        # ── Step 2：LLM 生成修复 ─────────────────────────────────────
         try:
             from hongjun.gateway.server import _get_llm
             llm = _get_llm()
@@ -274,7 +302,6 @@ class SelfRepairEngine:
 
             content = resp.content if hasattr(resp, "content") else str(resp)
             # 提取 JSON
-            import re
             m = re.search(r"\{.*\}", content, re.DOTALL)
             if m:
                 return json.loads(m.group())
