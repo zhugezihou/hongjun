@@ -25,13 +25,9 @@ Model Context Protocol (MCP) 服务器。
 
 from __future__ import annotations
 
-import asyncio
-import inspect
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional
 
-from mcp.server import FastMCP, Server
-from mcp.server.stdio import stdio_server
-from mcp.types import Tool, CallToolResult
+from mcp.server import FastMCP
 
 from ..logging_config import get_logger
 from ..tools import TOOL_REGISTRY

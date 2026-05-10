@@ -23,7 +23,6 @@
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
-import json
 
 
 @dataclass
@@ -232,7 +231,7 @@ class HongjunEvaluator:
             warnings.append("🔒 检测到潜在敏感信息泄露风险")
 
         if scores.get("performance", 1.0) < 0.5:
-            warnings.append(f"⏱️ 性能较慢，可考虑优化")
+            warnings.append("⏱️ 性能较慢，可考虑优化")
 
         if not result or len(result.strip()) == 0:
             warnings.append("❓ 结果为空，建议补充")
@@ -279,11 +278,11 @@ class HongjunEvaluator:
     def format_report(self, report: EvaluationReport) -> str:
         """格式化评估报告为可读字符串"""
         lines = [
-            f"📊 刑部·质量评估报告",
+            "📊 刑部·质量评估报告",
             f"{'=' * 40}",
             f"综合评分: {report.overall_score:.1%}  等级: {report.grade}",
-            f"",
-            f"分项得分:",
+            "",
+            "分项得分:",
         ]
 
         for dim, score in report.dimensions.items():

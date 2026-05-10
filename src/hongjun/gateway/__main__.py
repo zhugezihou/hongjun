@@ -1,5 +1,6 @@
 """Allow: python3 -m hongjun.gateway"""
-import sys, asyncio
+import sys
+import asyncio
 sys.path.insert(0, '/home/asus/hongjun/src')
 from hongjun.logging_config import get_logger
 logger = get_logger(__name__)

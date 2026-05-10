@@ -158,7 +158,6 @@ class HindsightIntegration:
 
         try:
             import asyncio
-            from functools import partial
 
             # 同步调用 async 方法
             loop = asyncio.new_event_loop()
@@ -460,7 +459,6 @@ def register_hindsight_tools():
     将 Hindsight 工具注册到鸿钧工具层。
     在 HongjunTools.__init__ 或 startup 时调用。
     """
-    from hongjun.tools import HongjunTools
 
     hi = HindsightIntegration()
 

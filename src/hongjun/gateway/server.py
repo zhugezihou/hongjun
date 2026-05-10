@@ -29,23 +29,20 @@ Response:
 """
 
 import asyncio
-import json
 import logging
 import re
 import signal
-import sys
 import time
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
-from aiohttp import web, WSMsgType
+from aiohttp import web
 
 # 内部模块
 from .db import HongjunDB
 from .session import SessionManager, SessionState, Session
-from .queue import RequestQueue, TaskPriority
+from .queue import RequestQueue
 
 
 # ── 工具调用审批管理器 ───────────────────────────────────────────────
@@ -571,7 +568,7 @@ class HongjunGateway:
         # 通用问答 → 直接 LLM；复杂任务（代码/搜索/记忆）→ 编排器
         # 注意：编排器自己管理记忆注入，不复用 server 层的 memory_context
         if HongjunGateway._needs_orchestrator(message):
-            logger.info(f"[route] 复杂任务，走编排器")
+            logger.info("[route] 复杂任务，走编排器")
             _msg = message          # 传原始消息，编排器自己取记忆
             _plat = session.platform
             _uid = session.platform_chat_id
@@ -588,7 +585,7 @@ class HongjunGateway:
                 logger.error(f"orchestrator call error: {e}")
                 response_text = f"【系统错误】处理失败：{e}"
         else:
-            logger.info(f"[route] 通用问答，直接 LLM")
+            logger.info("[route] 通用问答，直接 LLM")
             try:
                 llm = _get_llm()
                 if llm is None:
@@ -1327,7 +1324,6 @@ class HongjunGateway:
         trace_id = str(uuid.uuid4())[:8]
         _trace_request(logger, "_handle_agent_functions", trace_id)
         try:
-            from ..agent import FunctionCallAgent
             from ..tools import init_skills, TOOL_REGISTRY
 
             init_skills()
@@ -1402,11 +1398,11 @@ class HongjunGateway:
         logger.info(
             f"🚀 鸿钧 Gateway 启动成功 → http://{self.host}:{self.port}"
         )
-        logger.info(f"   POST /chat          - 聊天")
-        logger.info(f"   GET  /status        - 状态")
-        logger.info(f"   GET  /sessions      - 会话列表")
-        logger.info(f"   GET  /sessions/{{id}} - 会话详情")
-        logger.info(f"   POST /shutdown      - 关闭 Gateway")
+        logger.info("   POST /chat          - 聊天")
+        logger.info("   GET  /status        - 状态")
+        logger.info("   GET  /sessions      - 会话列表")
+        logger.info("   GET  /sessions/{id} - 会话详情")
+        logger.info("   POST /shutdown      - 关闭 Gateway")
 
         # 启动飞书通道（WebSocket 实时事件）
         await _start_feishu(self)

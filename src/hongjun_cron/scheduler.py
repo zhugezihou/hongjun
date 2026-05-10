@@ -11,11 +11,9 @@
 调度器本身是单线程的，通过线程池实现真正的并发执行。
 """
 
-import asyncio
 from hongjun.logging_config import get_logger
 import threading
-import time
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Optional
 
 from .db import CronDB

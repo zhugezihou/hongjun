@@ -50,10 +50,9 @@ from typing import Optional, Dict, Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 # === 导入核心模块 ===
-from hongjun.orchestrator import CoordinatorState, process_request
+from hongjun.orchestrator import process_request
 from hongjun.memory import HongjunMemory
 from hongjun.executor import HongjunExecutor
-from hongjun.tools import TOOL_REGISTRY, search_tool
 from hongjun.security import HongjunSecurity, Permission, PermissionGuard
 from hongjun.evaluator import HongjunEvaluator
 
@@ -352,9 +351,9 @@ def _start_server(hongjun: Hongjun, port: int):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     print(f"🌐 鸿钧 Web 服务已启动: http://0.0.0.0:{port}")
-    print(f"   GET  /health     — 健康检查")
-    print(f"   GET  /status     — 系统状态")
-    print(f"   POST /chat       — 对话接口 (JSON: {{'message': '...'}})")
+    print("   GET  /health     — 健康检查")
+    print("   GET  /status     — 系统状态")
+    print("   POST /chat       — 对话接口 (JSON: {'message': '...'})")
 
     # 保持主线程
     try:

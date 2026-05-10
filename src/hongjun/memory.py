@@ -25,7 +25,7 @@ import subprocess
 import uuid
 import threading
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 
 
 # === SQLite 轻量记忆（降级方案）===
@@ -122,7 +122,6 @@ class SQLiteMemory:
 
 # === Wing/Room 路由器 ===
 
-import re as _re
 
 # Hall types (hall_* in MemPalace):
 HALL_FACTS = "hall_facts"
@@ -549,7 +548,7 @@ class HongjunMemory:
             )
             self._col = get_collection(self.palace_path, create=True)
             self._mempalace_available = True
-        except Exception as e:
+        except Exception:
             self._mempalace_available = False
             self._stack = None
 
@@ -650,7 +649,6 @@ class HongjunMemory:
         tags: list[str] | None,
     ) -> None:
         """后台异步存入 Hindsight（静默失败，不阻塞主流程）。"""
-        import threading
 
         def _do():
             try:

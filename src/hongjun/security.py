@@ -52,7 +52,6 @@ class HongjunSecurity:
     def _init_nemo_rails(self):
         """初始化 NeMo Guardrails"""
         try:
-            from nemoguardrails import RailsConfig, LLMRails
             config_path = os.path.join(
                 os.path.dirname(__file__),
                 "../../../config/guardrails"

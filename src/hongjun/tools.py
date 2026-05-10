@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 from .models.tools import Tool, ToolParam, ToolResult
 from hongjun.logging_config import get_logger

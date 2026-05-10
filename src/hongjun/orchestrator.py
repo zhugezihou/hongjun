@@ -22,8 +22,7 @@
 """
 
 from langgraph.graph import StateGraph, END
-from typing import Annotated, TypedDict, List, Optional
-from pydantic import BaseModel, Field
+from typing import TypedDict, List, Optional
 from enum import Enum
 import re
 
@@ -295,7 +294,9 @@ def _handle_config_edit(req: str, req_lower: str) -> str:
       - 批量修改：sed/awk 对文件操作
       - 环境变量：export VAR=value / unset VAR
     """
-    import subprocess, os, re
+    import subprocess
+    import os
+    import re
     
     # 读取配置模式
     read_patterns = [
@@ -356,7 +357,7 @@ def _handle_deploy(req: str, req_lower: str) -> str:
     """
     执行部署操作：跑自动化脚本 / docker-compose / npm run build 等。
     """
-    import subprocess, os
+    import subprocess
     
     deploy_patterns = [
         # docker-compose
@@ -1103,7 +1104,7 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                     except Exception as e:
                         skill_result = f"[错误] 对话失败：{e}"
 
-        except Exception as e:
+        except Exception:
             pass  # fallback to pure LLM
 
         # 如果 IntentClassifier 也没有产生结果 → 纯 LLM fallback

@@ -21,7 +21,7 @@
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import subprocess
 import os
 

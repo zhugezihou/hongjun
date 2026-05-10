@@ -11,11 +11,9 @@
 
 import asyncio
 import json
-import logging
 import os
 import re
 import time
-import sys as _sys
 import threading
 from dataclasses import dataclass
 from typing import Optional

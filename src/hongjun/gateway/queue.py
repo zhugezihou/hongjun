@@ -9,10 +9,9 @@ import asyncio
 import threading
 import uuid
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Awaitable, Optional
+from typing import Awaitable
 from concurrent.futures import Future
 
 

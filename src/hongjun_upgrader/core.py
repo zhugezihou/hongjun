@@ -29,7 +29,7 @@ import hashlib
 from pathlib import Path
 from typing import Literal, Optional, List, Dict
 
-from .version import parse_version, compare_version, bump_version
+from .version import parse_version, bump_version
 
 # ============================================================
 # 常量
@@ -198,7 +198,7 @@ def _apply_tarball_upgrade(tarball_path: Path) -> tuple[bool, str]:
                     break
 
             if src_root is None:
-                return False, f"tar.gz 内未找到 src/hongjun/ 目录"
+                return False, "tar.gz 内未找到 src/hongjun/ 目录"
 
             # 逐文件替换（只替换 UPGRADABLE 范围内的文件）
             replaced = []
@@ -455,7 +455,7 @@ class HongjunUpgrader:
         _log(f"[UPGRADE] {current} -> {target} ({level})")
 
         if dry_run:
-            _log(f"[UPGRADE] Dry run complete (no changes made)")
+            _log("[UPGRADE] Dry run complete (no changes made)")
             return {
                 "success": True,
                 "result": UpgradeResult.NO_OP,
@@ -514,7 +514,7 @@ class HongjunUpgrader:
 
         if not fetch_ok:
             _log(f"[UPGRADE] Fetch failed: {fetch_error}")
-            _log(f"[UPGRADE] Restoring backup (upgrade failed)")
+            _log("[UPGRADE] Restoring backup (upgrade failed)")
             restore_backup(backup_path)
             return {
                 "success": False,
@@ -522,7 +522,7 @@ class HongjunUpgrader:
                 "detail": f"升级失败，已回滚。错误：{fetch_error}",
             }
 
-        _log(f"[UPGRADE] Source applied successfully")
+        _log("[UPGRADE] Source applied successfully")
 
         # 更新当前版本记录
         UPGRADE_DIR.mkdir(parents=True, exist_ok=True)
@@ -749,7 +749,7 @@ class HongjunUpgrader:
                 else:
                     _log(f"[RESTART] {svc} restarted")
             except FileNotFoundError:
-                _log(f"[WARN] systemctl not available")
+                _log("[WARN] systemctl not available")
                 all_ok = False
                 break
             except Exception as e:

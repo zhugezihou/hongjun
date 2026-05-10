@@ -32,8 +32,7 @@ Model Context Protocol (MCP) 客户端。
 from __future__ import annotations
 
 import asyncio
-import inspect
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -345,7 +344,7 @@ class MCPClient:
                     category="mcp",
                 )
                 count += 1
-            except ValueError as e:
+            except ValueError:
                 # 工具已存在，跳过
                 pass
 
@@ -396,7 +395,7 @@ def connect_filesystem(root: str = "/", prefix: str = "mcp_fs") -> MCPClient:
         args = ["-y", "@modelcontextprotocol/server-filesystem", root]
     elif shutil.which("node"):
         command = "node"
-        args = ["-e", f"require('@modelcontextprotocol/server-filesystem')"]
+        args = ["-e", "require('@modelcontextprotocol/server-filesystem')"]
     else:
         raise RuntimeError("Neither npx nor node is available for MCP filesystem server")
 

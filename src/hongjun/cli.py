@@ -26,7 +26,6 @@ import argparse
 import datetime
 import json
 import os
-import re
 import sqlite3
 import sys
 import traceback
@@ -103,7 +102,7 @@ def _summarize_old_messages(old_messages: list) -> str:
         return _simple_summarize(old_messages)
 
     try:
-        import httpx, json
+        import httpx
         url = "https://api.minimaxi.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -346,7 +345,7 @@ HONGJUN_SYSTEM_MESSAGE = """你是**鸿钧**（Hongjun），一个运行在 WSL 
 
 def _load_hermes_api_key() -> Optional[str]:
     """从 Hermes auth.json 加载 MiniMax API key（access_token）"""
-    import json, os
+    import os
     key = os.environ.get("MINIMAX_API_KEY", "")
     if key:
         return key

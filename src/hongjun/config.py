@@ -19,10 +19,9 @@
 from __future__ import annotations
 
 import os
-import sys
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator

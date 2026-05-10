@@ -45,7 +45,7 @@ import re
 import importlib.util
 import subprocess
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
@@ -599,14 +599,16 @@ def github_search(query: str, language: str = None, sort: str = "stars") -> str:
     """
     GitHub 仓库搜索（轻量版，curl + gh CLI 或 HTTP）。
     """
-    import subprocess, os, json
+    import subprocess
+    import os
+    import json
 
     # 优先用 gh CLI
     try:
         cmd = ["gh", "api", "search/repositories",
                "--jq", ".items[] | {name: .full_name, stars: .stargazers_count, desc: .description}"]
         if query:
-            cmd[-1] = f"-q", f"{query} in:name,description"
+            cmd[-1] = "-q", f"{query} in:name,description"
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         if result.returncode == 0 and result.stdout.strip():
             return f"🔍 GitHub 搜索 '{query}':\n{result.stdout[:1000]}"
@@ -643,7 +645,6 @@ def github_search(query: str, language: str = None, sort: str = "stars") -> str:
 
 
 # === 全局单例 ===
-import urllib.parse
 
 _env_val = os.environ.get("HONGJUN_SKILLS_ROOTS", "")
 _skills_roots = [p for p in _env_val.split(":") if p] or None

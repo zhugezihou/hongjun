@@ -333,7 +333,8 @@ class FunctionCallAgent(Agent):
         Returns:
             (函数名, 参数 dict) 或 (None, None)
         """
-        import json, re
+        import json
+        import re
 
         # 方式1：从 message.function_call（LLM 内部格式）
         if hasattr(message, "function_call") and message.function_call:

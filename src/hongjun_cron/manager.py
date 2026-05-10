@@ -7,7 +7,7 @@
 这是对外暴露的主要 API。
 """
 
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Optional, List
 
 from .models import (
@@ -19,7 +19,6 @@ from .models import (
 )
 from .db import CronDB
 from .scheduler import CronScheduler
-from .executor import CronExecutor
 from hongjun.logging_config import get_logger
 
 logger = get_logger("hongjun.cron.manager")
