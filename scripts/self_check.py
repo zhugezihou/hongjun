@@ -21,6 +21,8 @@ Usage:
 """
 
 import argparse
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -35,15 +37,85 @@ from hongjun.logging_config import get_logger
 logger = get_logger("hongjun.self_check")
 
 
+GATEWAY_PORT = 20830
+GATEWAY_CMD = [sys.executable, "-m", "hongjun.gateway", "--port", str(GATEWAY_PORT)]
+WORKDIR = Path(__file__).parent.parent / "src"
+PID_FILE = Path.home() / ".hongjun" / "gateway.pid"
+LOG_FILE = Path.home() / "hongjun" / "gateway_stderr.log"
+
+
 def check_gateway() -> dict:
     """检查 Gateway 健康"""
     try:
         import httpx
-        resp = httpx.get("http://127.0.0.1:20830/health", timeout=5.0)
+        resp = httpx.get(f"http://127.0.0.1:{GATEWAY_PORT}/health", timeout=5.0)
         ok = resp.status_code == 200 and resp.text == "OK"
         return {"status": "OK" if ok else "UNHEALTHY", "code": resp.status_code, "body": resp.text}
     except Exception as e:
         return {"status": "DOWN", "error": str(e)}
+
+
+def _read_pid() -> int | None:
+    try:
+        return int(PID_FILE.read_text().strip())
+    except Exception:
+        return None
+
+
+def _is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def restart_gateway() -> dict:
+    """重启 Gateway 进程，返回结果"""
+    pid = _read_pid()
+    alive = _is_alive(pid) if pid else False
+    responding = False
+    if alive:
+        gw_check = check_gateway()
+        responding = gw_check["status"] == "OK"
+
+    if alive and responding:
+        return {"action": "none", "reason": "gateway_already_running", "pid": pid}
+
+    # 需要重启
+    if alive and not responding:
+        logger.warning(f"Gateway PID {pid} 无响应，尝试重启...")
+        try:
+            os.kill(pid, 15)  # SIGTERM
+            time.sleep(2)
+            try:
+                os.kill(pid, 9)  # SIGKILL
+            except OSError:
+                pass
+        except OSError:
+            pass
+
+    # 启动新进程
+    env = {**os.environ, "PYTHONPATH": str(WORKDIR), "PYTHONUNBUFFERED": "1"}
+    try:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        log_fp = open(LOG_FILE, "a", encoding="utf-8")
+        proc = subprocess.Popen(
+            GATEWAY_CMD,
+            cwd=str(WORKDIR),
+            env=env,
+            stdout=log_fp,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        new_pid = proc.pid
+        PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PID_FILE.write_text(str(new_pid), encoding="utf-8")
+        logger.info(f"Gateway 重启成功 PID={new_pid}")
+        return {"action": "restarted", "pid": new_pid}
+    except Exception as e:
+        logger.error(f"Gateway 重启失败: {e}")
+        return {"action": "failed", "error": str(e)}
 
 
 def check_logs() -> list[str]:
@@ -65,8 +137,13 @@ def check_logs() -> list[str]:
         return []
 
 
-def run_check(fix: bool = False) -> dict:
-    """执行完整自检"""
+def run_check(fix: bool = False, restart: bool = True) -> dict:
+    """执行完整自检
+
+    Args:
+        fix: 是否尝试修复代码问题
+        restart: 是否在 Gateway DOWN 时自动重启
+    """
     report = {
         "timestamp": time.time(),
         "gateway": check_gateway(),
@@ -75,15 +152,31 @@ def run_check(fix: bool = False) -> dict:
         "repairs_attempted": [],
         "notifications_sent": 0,
         "status": "OK",
+        "gateway_restart": None,
     }
 
-    # 运行诊断
+    # Gateway 进程级检查：DOWN 则尝试重启
+    if report["gateway"]["status"] != "OK" and restart:
+        logger.warning(f"Gateway 状态异常: {report['gateway']['status']}，尝试重启...")
+        restart_result = restart_gateway()
+        report["gateway_restart"] = restart_result
+        # 等待一下再检查
+        time.sleep(5)
+        new_status = check_gateway()
+        report["gateway"] = new_status
+        if new_status["status"] == "OK":
+            report["status"] = "GATEWAY_RESTORED"
+        else:
+            report["status"] = "GATEWAY_DOWN"
+
+    # 运行代码诊断
     engine = SelfRepairEngine()
     diag = engine.run_diagnostics()
     report["diagnostics"] = diag.summary()
 
     if diag.issues:
-        report["status"] = "ISSUES_FOUND"
+        if report["status"] == "OK":
+            report["status"] = "ISSUES_FOUND"
         for issue in diag.issues:
             if issue.severity == "critical":
                 logger.error(f"Critical issue in {issue.module}: {issue.description}")
@@ -106,6 +199,14 @@ def format_report(report: dict) -> str:
     gw = report["gateway"]
     gw_icon = "✅" if gw["status"] == "OK" else "❌"
     lines.append(f"{gw_icon} **Gateway**: {gw['status']}")
+
+    # Gateway 重启记录
+    gr = report.get("gateway_restart")
+    if gr:
+        if gr.get("action") == "restarted":
+            lines.append(f"  🔄 已重启 PID={gr.get('pid')}")
+        elif gr.get("action") == "failed":
+            lines.append(f"  ❌ 重启失败: {gr.get('error')}")
 
     # 日志错误
     errors = report.get("errors_in_log", [])
@@ -140,6 +241,10 @@ def format_report(report: dict) -> str:
     status = report.get("status", "UNKNOWN")
     if status == "OK":
         lines.append(f"\n✅ 状态：**一切正常**")
+    elif status == "GATEWAY_RESTORED":
+        lines.append(f"\n🔄 状态：**Gateway 已自动恢复**")
+    elif status == "GATEWAY_DOWN":
+        lines.append(f"\n❌ 状态：**Gateway 宕机，恢复失败！**")
     elif status == "ISSUES_FOUND":
         lines.append(f"\n⚠️ 状态：**发现问题**（建议检查）")
     elif status == "AUTO_REPAIRED":
