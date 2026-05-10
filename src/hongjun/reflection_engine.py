@@ -305,7 +305,81 @@ class ReflectionEngine:
 
     # ── 定时全量反思 ──────────────────────────────────────────────────────
 
-    def daily_reflection(self) -> ReflectionResult:
+    # ── 任务触发反思（供 evolution_memory 钩子调用） ──────────────────────
+
+    def trigger_task_reflection(
+        self,
+        request: str = "",
+        result: str = "",
+        error: str = "",
+        success: bool = True,
+    ):
+        """
+        任务完成/失败后触发的小反思。
+
+        由 evolution_memory.on_task_complete / on_task_failure 自动调用。
+        在后台线程运行，不阻塞主流程。
+
+        逻辑：
+          成功 → 从 result 提取意图类型 → 巩固该模式
+          失败 → 从 error 提取错误类型 → 警告该模式
+        """
+        import threading
+
+        def _do_reflect():
+            try:
+                intent_type = self._infer_intent(request)
+                task = request[:80] if request else "unknown"
+
+                # 从 result/error 提取预览
+                preview = (result or error)[:200]
+
+                self.reflect_on_task(
+                    success=success,
+                    intent_type=intent_type,
+                    task=task,
+                    request=request,
+                    result_preview=result[:200] if success else "",
+                    error=error[:200] if not success else "",
+                )
+                logger.info(f"🧠 任务反思完成: {'✅' if success else '❌'} [{intent_type}]")
+            except Exception as e:
+                logger.warning(f"后台反思失败（静默）: {e}")
+
+        thread = threading.Thread(target=_do_reflect, daemon=True)
+        thread.start()
+
+    def _infer_intent(self, request: str) -> str:
+        """从请求中推断意图类型（简单关键词匹配）"""
+        req_lower = request.lower()
+        if any(k in req_lower for k in ["搜索", "查询", "了解", "查一下", "搜索"]):
+            return "search"
+        if any(k in req_lower for k in ["写代码", "开发", "实现", "写个", "帮我写"]):
+            return "code_generation"
+        if any(k in req_lower for k in ["git", "提交", "推送", "分支", "commit", "push"]):
+            return "git_operation"
+        if any(k in req_lower for k in ["飞书", "telegram", "通知", "消息"]):
+            return "messaging"
+        if any(k in req_lower for k in ["运行", "执行", "命令", "shell"]):
+            return "shell_command"
+        if any(k in req_lower for k in ["反思", "复盘", "总结"]):
+            return "reflection"
+        return "general"
+
+    def get_best_strategy(self, intent_type: str, request: str = "") -> Optional[str]:
+        """
+        获取某意图类型的最佳策略描述。
+
+        由 memory_injection 调用，用于注入到 LLM 上下文。
+        """
+        for p in self.patterns.values():
+            if p.is_active and p.intent_type == intent_type and p.weight >= 0.5:
+                return f"[最佳策略 {p.intent_type}] {p.strategy[:200]}"
+        return None
+
+    # ── 每日全量反思 ──────────────────────────────────────────────────────
+
+    def daily_reflection(self, dry_run: bool = False) -> ReflectionResult:
         """
         每天全量反思：遍历所有模式，做整体优化。
 
