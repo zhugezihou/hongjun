@@ -109,7 +109,18 @@ def _stream_sse(
     def parse_sse_events(resp_io):
         """从 SSE 响应流中解析事件，逐个放入 event_queue。"""
         buffer = b""
-        for chunk in iter(lambda: resp_io.read(1024), b""):
+        while True:
+            try:
+                chunk = resp_io.read(1024)
+                if chunk == b"":
+                    # 流结束
+                    event_queue.put(("__DONE__", {}))
+                    return
+            except Exception:
+                # 连接被提前关闭（如服务器重启/超时），安全退出
+                event_queue.put(("__DONE__", {}))
+                return
+
             buffer += chunk
             # 按 "data: " 或 "\n\n" 分割
             lines = buffer.split(b"\n")
