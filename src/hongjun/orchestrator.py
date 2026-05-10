@@ -1133,9 +1133,17 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
         except Exception:
             pass  # fallback to pure LLM
 
-        # 如果 IntentClassifier 也没有产生结果 → 纯 LLM fallback
+        # ── 如果没有任何结果 → 直接走 conversation（通用问答）──
+        # 注意：不要在这里 append 无用的系统消息，summarize 会用 skill_result 决定输出
         if not skill_result:
-            results.append("[系统] 暂无该内置能力，已将请求转发给 LLM 处理。")
+            try:
+                skill_result = _llm_call(
+                    [{"role": "user", "content": state["user_request"]}],
+                    state,
+                    intent_type="conversation",
+                )
+            except Exception as e:
+                skill_result = ""
 
     # === 记忆检索（无论有无 skill 都执行）===
     try:
