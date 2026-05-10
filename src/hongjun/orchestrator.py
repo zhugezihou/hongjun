@@ -252,8 +252,9 @@ def parse_intent(state: CoordinatorState) -> CoordinatorState:
 
     intent_result = _classify_intent(request)
 
-    # 步骤回调：意图已解析
-    _emit_step("intent", {"intent": intent_result, "subtasks": [s.get("description", "") for s in subtasks]})
+    # 步骤回调：意图已解析（仅在预检轮次发射；执行轮次跳过以避免重复）
+    if not state.get("approved_op"):
+        _emit_step("intent", {"intent": intent_result, "subtasks": [s.get("description", "") for s in subtasks]})
 
     return {
         **state,
@@ -582,7 +583,7 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
         # Skill 优先执行
         func = next(iter(best_skill.functions.values()), None)
         if func:
-            # 步骤回调：开始执行 skill
+            # 步骤回调：开始执行 skill（审批流执行轮次 或 无审批流都发射）
             _emit_step("task_start", {"skill": best_skill.name, "task": best_skill.description})
 
             url_match = re.search(r'https?://[^\s<>"\' ]+', state["user_request"])
@@ -1276,8 +1277,9 @@ def summarize(state: CoordinatorState) -> CoordinatorState:
             flags=re.DOTALL | re.IGNORECASE,
         ).strip()
 
-        # 步骤回调：最终回复已生成（实际内容由 SSE chunk 后续送达）
-        _emit_step("final", {"response": "(内容由 SSE chunk 送达)"})
+        # 步骤回调：最终回复已生成（仅第一次调用时发射；审批后第二次调用跳过）
+        if not state.get("approved_op"):
+            _emit_step("final", {"response": "(内容由 SSE chunk 送达)"})
 
         return {
             **state,
@@ -1295,8 +1297,9 @@ def summarize(state: CoordinatorState) -> CoordinatorState:
 
     final_response = "\n\n".join(parts) if parts else "任务执行完成，无返回结果。"
 
-    # 步骤回调：最终回复已生成（路径B）
-    _emit_step("final", {"response": final_response[:200]})
+    # 步骤回调：最终回复已生成（仅第一次调用时发射；审批后第二次调用跳过）
+    if not state.get("approved_op"):
+        _emit_step("final", {"response": final_response[:200]})
 
     return {
         **state,
