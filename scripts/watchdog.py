@@ -25,15 +25,16 @@ GATEWAY_CMD = [
 ]
 WORKDIR = Path(__file__).parent.parent / "src"
 PID_FILE = Path.home() / ".hongjun" / "gateway.pid"
-LOG_FILE = Path.home() / "hongjun" / "watchdog.log"
+LOG_FILE = Path.home() / "hongjun" / "gateway_stderr.log"
+WATCHDOG_LOG = Path.home() / ".hongjun" / "watchdog.log"
 
 
 def log(msg: str):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line)
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.write_text(line + "\n", encoding="utf-8")
+    WATCHDOG_LOG.parent.mkdir(parents=True, exist_ok=True)
+    WATCHDOG_LOG.write_text(line + "\n", encoding="utf-8")
 
 
 def read_pid() -> int | None:
@@ -72,12 +73,13 @@ def start_gateway() -> int | None:
         "PYTHONUNBUFFERED": "1",
     }
     try:
+        log_fp = open(LOG_FILE, "a", encoding="utf-8")
         proc = subprocess.Popen(
             GATEWAY_CMD,
             cwd=str(WORKDIR),
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fp,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
         return proc.pid
