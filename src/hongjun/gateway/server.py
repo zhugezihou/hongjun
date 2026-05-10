@@ -482,11 +482,14 @@ class HongjunGateway:
         platform: str = "feishu",
         user_id: Optional[str] = None,
         approved_op: Optional[str] = None,
+        step_callback: Optional[callable] = None,
     ) -> str:
         """在线程池中执行的同步编排器调用（仅用于复杂任务）
 
         Args:
             approved_op: 已批准的 operation id（二次调用时传入，跳过危险操作预检）
+            step_callback: 步骤回调，签名 callback(step_type, step_data)
+                           在同步线程中调用，不能执行 async 操作。
         """
         orch = _get_orchestrator()
         if orch is None:
@@ -496,10 +499,14 @@ class HongjunGateway:
                 message,
                 user_id=user_id,
                 approved_op=approved_op,
+                step_callback=step_callback,
             )
         except TypeError:
-            # 兼容旧签名（无 approved_op 参数）
-            return orch.process_request(message, user_id=user_id)
+            # 兼容旧签名（无 approved_op / step_callback 参数）
+            try:
+                return orch.process_request(message, user_id=user_id, approved_op=approved_op)
+            except TypeError:
+                return orch.process_request(message, user_id=user_id)
         except Exception as e:
             logger.error(f"orchestrator error: {e}")
             return f"【系统错误】处理失败：{e}"
@@ -732,6 +739,7 @@ class HongjunGateway:
         platform: str = body.get("platform", "local")
         platform_chat_id: Optional[str] = body.get("platform_chat_id")
         memory_context: str = body.get("memory_context", "")
+        verbose: bool = body.get("verbose", False)  # verbose 模式：发送详细步骤 SSE
 
         session = self.sessions.get_or_create_session(
             session_id=session_id,
@@ -780,7 +788,9 @@ class HongjunGateway:
         # ── 路由判断 ───────────────────────────────────────────
         # 简单对话：直接流 LLM token
         # 复杂任务：流式返回编排器结果（分 chunk 发送）
-        if not HongjunGateway._needs_orchestrator(message):
+        # Verbose 模式：强制走编排器（以获取步骤事件）
+        use_orchestrator = verbose or HongjunGateway._needs_orchestrator(message)
+        if not use_orchestrator:
             # ── 简单对话 → LLM token 流 ───────────────────────
             try:
                 llm_mod = _get_llm()
@@ -881,6 +891,16 @@ class HongjunGateway:
             # 第二阶段：审批后二次调用（危险操作已批准，直接执行）
             MAX_APPROVAL_ROUNDS = 3
             result: str = ""
+
+            # Verbose 模式：步骤回调 → queue → SSE
+            step_queue = None
+            step_callback = None
+            if verbose:
+                import queue as _queue
+                step_queue = _queue.Queue()
+                def step_callback(step_type: str, step_data: dict):
+                    step_queue.put((step_type, step_data))
+
             for _round in range(MAX_APPROVAL_ROUNDS):
                 try:
                     loop = asyncio.get_event_loop()
@@ -893,9 +913,30 @@ class HongjunGateway:
                             platform,
                             platform_chat_id,
                             approved_op=_round > 0 and _pending_approval_id or None,
+                            step_callback=step_callback,
                         )
 
                     result = await loop.run_in_executor(None, run_orchestrator)
+
+                    # Verbose 模式：立即发送本轮产生的步骤
+                    if step_queue:
+                        while True:
+                            try:
+                                step_type, step_data = step_queue.get_nowait()
+                                step_label = {
+                                    "intent": "🎯 意图解析",
+                                    "task_start": "🚀 开始执行",
+                                    "task_done": "📋 任务完成",
+                                    "final": "✅ 最终回复",
+                                }.get(step_type, f"步骤/{step_type}")
+                                await sse({
+                                    "type": "step",
+                                    "step": step_type,
+                                    "label": step_label,
+                                    "data": step_data,
+                                })
+                            except Exception:
+                                break
 
                     # 检测哨兵：编排器告知需要审批
                     if isinstance(result, dict) and result.get("__NEEDS_APPROVAL__"):

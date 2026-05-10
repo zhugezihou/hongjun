@@ -2,14 +2,15 @@
 鸿钧 · Gateway CLI
 ==================
 
-直连鸿钧 Gateway HTTP API 的交互式命令行界面。
+直连鸿钧 Gateway HTTP API 的交互式命令行界面，支持 SSE 流式步骤展示。
 
 用法：
   python -m hongjun.gateway_cli                    # 交互模式
   python -m hongjun.gateway_cli "1+1等于几"         # 单次模式
   python -m hongjun.gateway_cli --once "你是谁"    # 单次模式（同上）
+  python -m hongjun.gateway_cli --no-steps "问题"   # 不显示执行步骤
 
-依赖：仅标准库（urllib + json + readline）。
+依赖：仅标准库（urllib + json + readline + threading）。
 """
 
 from __future__ import annotations
@@ -19,10 +20,11 @@ import json
 import sys
 import urllib.request
 import urllib.error
-import urllib.parse
+import threading
+import queue as _queue
 import datetime
 import time
-import uuid
+import io
 from pathlib import Path
 
 # ANSI 颜色
@@ -34,6 +36,7 @@ RED = "\033[31m"
 DIM = "\033[2m"
 RESET = "\033[0m"
 MAGENTA = "\033[35m"
+WHITE = "\033[37m"
 
 
 def color(text: str, c: str) -> str:
@@ -46,30 +49,199 @@ DEFAULT_GATEWAY = "http://localhost:20830"
 TIMEOUT_SEC = 120
 
 
-# ── Gateway 通信 ─────────────────────────────────────────────────────────────
+# ── SSE 事件类型 ─────────────────────────────────────────────────────────────
 
-def _post_chat(gateway: str, message: str, session_id: str | None = None) -> dict:
-    """发送消息到 gateway /chat，返回 JSON 响应字典。"""
-    payload = {"message": message}
+EVENT_TYPES = {
+    "status": "ℹ️",
+    "chunk": None,        # 直接合并到 accumulator
+    "step": "🔧",
+    "done": "✅",
+    "error": "❌",
+    "pending_approval": "⚠️",
+}
+
+
+# ── SSE 流式请求 ─────────────────────────────────────────────────────────────
+
+def _stream_sse(
+    gateway: str,
+    message: str,
+    session_id: str | None = None,
+    verbose: bool = True,
+) -> tuple[str, float]:
+    """
+    通过 SSE /stream 端点发送消息，返回 (final_response, elapsed_seconds)。
+
+    实时解析 SSE 事件，按类型分发显示：
+    - step: 显示执行步骤（意图解析/任务开始/任务完成）
+    - status: 显示状态消息
+    - chunk: 累积到响应文本
+    - done: 返回最终文本
+    - pending_approval: 显示审批请求
+
+    使用后台线程读取 SSE流，主线程处理显示。
+    """
+    payload = {
+        "message": message,
+        "platform": "cli",
+        "verbose": verbose,
+    }
     if session_id:
         payload["session_id"] = session_id
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        f"{gateway}/chat",
+        f"{gateway}/stream",
         data=data,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        resp = urllib.request.urlopen(req, timeout=TIMEOUT_SEC)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {e.code}: {body[:500]}")
     except urllib.error.URLError as e:
         raise RuntimeError(f"连接失败: {e.reason}。确认鸿钧 Gateway 是否在运行（默认 localhost:20830）")
+
+    # SSE 行解析器
+    def parse_sse_events(resp_io):
+        """从 SSE 响应流中解析事件，逐个放入 event_queue。"""
+        buffer = b""
+        for chunk in iter(lambda: resp_io.read(1024), b""):
+            buffer += chunk
+            # 按 "data: " 或 "\n\n" 分割
+            lines = buffer.split(b"\n")
+            buffer = lines[-1]  # 保留不完整的行
+
+            i = 0
+            while i < len(lines) - 1:
+                line = lines[i].decode("utf-8", errors="replace").strip()
+                i += 1
+                if line.startswith("data: "):
+                    data_str = line[len("data: "):]
+                    if data_str == "[DONE]":
+                        event_queue.put(("__DONE__", {}))
+                        return
+                    try:
+                        event = json.loads(data_str)
+                        event_type = event.get("type", "unknown")
+                        event_queue.put((event_type, event))
+                    except json.JSONDecodeError:
+                        pass
+                elif line == "" and i > 1:
+                    # 空行可能是 SSE 事件分隔符，继续处理
+                    pass
+
+        # 流结束
+        event_queue.put(("__DONE__", {}))
+
+    # 事件队列：元素为 (type, data_dict)
+    event_queue: _queue.Queue = _queue.Queue()
+
+    # 启动 SSE 读取线程
+    reader_thread = threading.Thread(
+        target=parse_sse_events,
+        args=(resp,),
+        daemon=True,
+    )
+    reader_thread.start()
+
+    # 主线程处理事件
+    accumulated = ""
+    final_response = ""
+    start_time = time.time()
+    steps_shown = []
+    pending_approval_shown = False
+    step_count = 0
+
+    def print_line(text, c=DIM, newline=True):
+        if newline:
+            print(color(f"  {text}", c))
+        else:
+            print(color(f"  {text}", c), end="", flush=True)
+
+    while True:
+        try:
+            event_type, event = event_queue.get(timeout=TIMEOUT_SEC)
+        except _queue.Empty:
+            raise RuntimeError("SSE 流超时（无响应）")
+
+        if event_type == "__DONE__":
+            break
+
+        elif event_type == "step":
+            step = event.get("step", "")
+            label = event.get("label", f"[{step}]")
+            data = event.get("data", {})
+            step_count += 1
+
+            if step == "intent":
+                intent = data.get("intent", "")
+                subtasks = data.get("subtasks", [])
+                print_line(f"", DIM)
+                print_line(f"🎯 意图解析", CYAN)
+                print_line(f"   意图: {intent}", WHITE)
+                if subtasks:
+                    for t in subtasks[:3]:
+                        print_line(f"   → {t}", DIM)
+
+            elif step == "task_start":
+                skill = data.get("skill", "")
+                task = data.get("task", "")
+                print_line(f"", DIM)
+                print_line(f"🚀 开始执行", YELLOW)
+                print_line(f"   技能: {skill or task}", WHITE)
+
+            elif step == "task_done":
+                result = (data.get("result", "") or "")[:100]
+                print_line(f"📋 任务完成", GREEN)
+                if result:
+                    print_line(f"   结果: {result}...", DIM)
+                else:
+                    print_line(f"   (无详细结果)", DIM)
+
+            elif step == "final":
+                response_preview = (data.get("response", "") or "")[:150]
+                print_line(f"✅ 最终回复", GREEN)
+
+        elif event_type == "status":
+            content = event.get("content", "")
+            if "分析意图" in content or "执行" in content:
+                print_line(f"  {content}", YELLOW)
+            else:
+                print_line(f"  {content}", DIM)
+
+        elif event_type == "chunk":
+            chunk = event.get("content", "")
+            accumulated += chunk
+            print_line(chunk, CYAN, newline=False)
+
+        elif event_type == "done":
+            final_response = event.get("content", "") or accumulated
+            print_line(f"", DIM)
+
+        elif event_type == "error":
+            err_msg = event.get("content", "未知错误")
+            print_line(f"", DIM)
+            print_line(f"❌ 错误: {err_msg}", RED)
+
+        elif event_type == "pending_approval":
+            if not pending_approval_shown:
+                reason = event.get("reason", "")
+                severity = event.get("severity", 0)
+                severity_label = {5: "中", 8: "高", 10: "极高"}.get(severity, str(severity))
+                print_line(f"", DIM)
+                print_line(f"⚠️  危险操作待审批（等级: {severity_label}）", YELLOW)
+                print_line(f"   原因: {reason}", WHITE)
+                print_line(f"   命令: {message[:80]}", DIM)
+                pending_approval_shown = True
+
+    elapsed = time.time() - start_time
+    reader_thread.join(timeout=2)
+
+    return final_response or accumulated, elapsed
 
 
 def _get_status(gateway: str) -> dict:
@@ -82,7 +254,7 @@ def _get_status(gateway: str) -> dict:
         return {"error": str(e)}
 
 
-# ── 会话历史 ────────────────────────────────────────────────────────────────
+# ── 会话历史 ──────────────────────────────────────────────────────────────────
 
 SESSIONS_DIR = Path.home() / ".hongjun" / "cli_sessions"
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -105,31 +277,20 @@ def _save_history(session_id: str, history: list[dict]) -> None:
         json.dump(history, fp, ensure_ascii=False)
 
 
-# ── 渲染 ────────────────────────────────────────────────────────────────────
+# ── 渲染 ──────────────────────────────────────────────────────────────────────
 
-def _render_response(resp: dict) -> None:
-    """渲染 /chat 响应到终端。"""
-    response_text = resp.get("response", "(无回复)")
-    latency = resp.get("latency_s", 0)
-    score = resp.get("eval_score", 0)
-    msg_count = resp.get("message_count", 0)
-
+def _render_response_final(final_response: str, latency: float, score: float = 0) -> None:
+    """在单次/简略模式下渲染最终回复。"""
     print()
-    # 助手回复
-    for line in response_text.split("\n"):
+    for line in final_response.split("\n"):
         print(color(f"  {line}", CYAN))
     print()
-
-    # 元信息
     meta_parts = []
     if latency:
         meta_parts.append(color(f"{latency:.1f}s", DIM))
     if score:
         score_color = GREEN if score >= 0.7 else YELLOW if score >= 0.4 else RED
         meta_parts.append(color(f"得分 {score:.2f}", score_color))
-    if msg_count:
-        meta_parts.append(color(f"轮次 {msg_count}", DIM))
-
     if meta_parts:
         print(color(f"  {'  |  '.join(meta_parts)}", DIM))
 
@@ -157,23 +318,27 @@ def _print_banner(gateway: str) -> None:
         uptime = status.get("uptime", "?")
         banner = f"""{BOLD}{CYAN}
   ╔════════════════════════════════════════╗
-  ║     鸿钧 Gateway CLI  (v1.0.0)         ║
+  ║     鸿钧 Gateway CLI  (v2.0.0)       ║
   ║     Gateway: {gateway}      ║
-  ║     版本: {ver}   在线: {uptime}           ║
-  ║     输入 exit/quit 退出                 ║
+  ║     版本: {ver}   在线: {uptime}          ║
+  ║     输入 exit/quit 退出                ║
   ╚════════════════════════════════════════╝{RESET}"""
     else:
         banner = f"""{BOLD}{CYAN}
   ╔════════════════════════════════════════╗
-  ║     鸿钧 Gateway CLI  (v1.0.0)         ║
+  ║     鸿钧 Gateway CLI  (v2.0.0)       ║
   ║     Gateway: {gateway}              ║
-  ║     ⚠️  Gateway 连接失败              ║
+  ║     ⚠️  Gateway 连接失败               ║
   ╚════════════════════════════════════════╝{RESET}"""
     print(banner)
 
 
-def run_chat(gateway: str, session_id: str | None = None) -> None:
-    """交互式聊天。"""
+def run_chat(
+    gateway: str,
+    session_id: str | None = None,
+    show_steps: bool = True,
+) -> None:
+    """交互式聊天（默认 SSE 流式 + 步骤展示）。"""
     if session_id is None:
         session_id = f"cli-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
@@ -184,6 +349,8 @@ def run_chat(gateway: str, session_id: str | None = None) -> None:
         print(color(f"\n  加载历史会话: {session_id}  ({len(history)} 条消息)\n", DIM))
 
     print(color(f"  会话ID: {session_id}", DIM))
+    if show_steps:
+        print(color(f"  步骤展示: 开启（--no-steps 关闭）", DIM))
     print()
 
     prompt_count = len([m for m in history if m["role"] == "user"])
@@ -215,51 +382,53 @@ def run_chat(gateway: str, session_id: str | None = None) -> None:
         # 追加到 readline 历史
         readline.add_history(user_input)
 
-        # 发请求
-        print(color("  ⏳ 等待回复...", DIM), flush=True)
-        t0 = time.time()
-
+        # SSE 流式请求
         try:
-            resp = _post_chat(gateway, user_input, session_id)
-            elapsed = time.time() - t0
-            _render_response(resp)
+            final_response, elapsed = _stream_sse(
+                gateway, user_input, session_id, verbose=show_steps
+            )
+            _render_response_final(final_response, elapsed)
         except RuntimeError as e:
             _render_error(str(e))
             print(color("  ⚠️  仍可继续输入，Gateway 恢复后会正常", DIM))
             continue
 
         # 保存助手回复
-        history.append({"role": "assistant", "content": resp.get("response", "")})
+        history.append({"role": "assistant", "content": final_response})
         _save_history(session_id, history)
 
 
 # ── 单次模式 ─────────────────────────────────────────────────────────────────
 
-def run_once(gateway: str, query: str) -> None:
-    """单次查询。"""
-    print(color(f"  ⏳ 等待回复...", DIM), flush=True)
-    t0 = time.time()
+def run_once(
+    gateway: str,
+    query: str,
+    show_steps: bool = True,
+) -> None:
+    """单次查询（默认 SSE 流式 + 步骤展示）。"""
     try:
-        resp = _post_chat(gateway, query)
-        elapsed = time.time() - t0
-        _render_response(resp)
+        final_response, elapsed = _stream_sse(
+            gateway, query, None, verbose=show_steps
+        )
+        _render_response_final(final_response, elapsed)
     except RuntimeError as e:
         _render_error(str(e))
         sys.exit(1)
 
 
-# ── main ─────────────────────────────────────────────────────────────────────
+# ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="hongjun",
-        description="鸿钧 Gateway CLI — 直连 Gateway HTTP API",
+        description="鸿钧 Gateway CLI — 直连 Gateway SSE 流式 API",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
   python -m hongjun.gateway_cli                        # 交互模式
   python -m hongjun.gateway_cli "你好"                 # 单次查询
-  python -m hongjun.gateway_cli --once "你是谁"        # 单次查询（同上）
+  python -m hongjun.gateway_cli --once "你是谁"       # 单次查询（同上）
+  python -m hongjun.gateway_cli --no-steps "你好"     # 不显示执行步骤
   python -m hongjun.gateway_cli --gateway 20830 "你好" # 指定端口
         """,
     )
@@ -276,6 +445,10 @@ def main() -> None:
     parser.add_argument(
         "--session", "-s", help="指定会话 ID（交互模式）",
     )
+    parser.add_argument(
+        "--no-steps", dest="show_steps", action="store_false", default=True,
+        help="不显示执行步骤（仅显示最终回复）",
+    )
 
     args = parser.parse_args()
 
@@ -283,9 +456,9 @@ def main() -> None:
         if not args.query:
             print("错误: 请输入查询内容", file=sys.stderr)
             sys.exit(1)
-        run_once(args.gateway, args.query)
+        run_once(args.gateway, args.query, show_steps=args.show_steps)
     else:
-        run_chat(args.gateway, args.session)
+        run_chat(args.gateway, args.session, show_steps=args.show_steps)
 
 
 if __name__ == "__main__":

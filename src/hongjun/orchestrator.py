@@ -28,7 +28,25 @@ from pathlib import Path
 import re
 import time
 import uuid
+from contextvars import ContextVar
 from .self_evolution import verify_and_execute
+
+
+# ── Step callback context var（用于在 sync 调用链中传递回调，不经过 LangGraph state）──
+_step_callback_var: ContextVar[Optional[callable]] = ContextVar(
+    "_step_callback", default=None
+)
+
+
+def _emit_step(step_type: str, step_data: dict) -> None:
+    """在当前 context 中发射步骤事件（若 callback 已设置）。"""
+    cb = _step_callback_var.get()
+    if cb:
+        try:
+            cb(step_type, step_data)
+        except Exception:
+            pass
+
 
 
 # ── LLM 调用辅助（含记忆注入）───────────────────────────────────────────────
@@ -222,11 +240,17 @@ def parse_intent(state: CoordinatorState) -> CoordinatorState:
         "result": None,
     })
 
+    intent_result = _classify_intent(request)
+
+    # 步骤回调：意图已解析
+    _emit_step("intent", {"intent": intent_result, "subtasks": [s.get("description", "") for s in subtasks]})
+
     return {
         **state,
-        "intent": _classify_intent(request),
+        "intent": intent_result,
         "subtasks": subtasks,
     }
+
 
 
 def _classify_intent(request: str) -> str:
@@ -548,7 +572,10 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
         # Skill 优先执行
         func = next(iter(best_skill.functions.values()), None)
         if func:
-            url_match = re.search(r'https?://[^\s<>"\']+', state["user_request"])
+            # 步骤回调：开始执行 skill
+            _emit_step("task_start", {"skill": best_skill.name, "task": best_skill.description})
+
+            url_match = re.search(r'https?://[^\s<>"\' ]+', state["user_request"])
 
             try:
                 if best_skill.name == "web-scraper" and "scrape" in best_skill.functions:
@@ -1188,6 +1215,9 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
             except Exception as e:
                 skill_result = ""
 
+    # 步骤回调：任务完成
+    _emit_step("task_done", {"result": (skill_result or "")[:200]})
+
     # === 记忆检索（无论有无 skill 都执行）===
     try:
         from .memory import HongjunMemory
@@ -1231,6 +1261,9 @@ def summarize(state: CoordinatorState) -> CoordinatorState:
             flags=re.DOTALL | re.IGNORECASE,
         ).strip()
 
+        # 步骤回调：最终回复已生成（实际内容由 SSE chunk 后续送达）
+        _emit_step("final", {"response": "(内容由 SSE chunk 送达)"})
+
         return {
             **state,
             "final_response": cleaned or skill_result,
@@ -1246,6 +1279,10 @@ def summarize(state: CoordinatorState) -> CoordinatorState:
     # （其内容来自 MemPalace，可能包含低质量/高噪音数据，直接展示影响体验）
 
     final_response = "\n\n".join(parts) if parts else "任务执行完成，无返回结果。"
+
+    # 步骤回调：最终回复已生成（路径B）
+    _emit_step("final", {"response": final_response[:200]})
+
     return {
         **state,
         "final_response": final_response,
@@ -1284,6 +1321,7 @@ def process_request(
     user_request: str,
     user_id: Optional[str] = None,
     approved_op: Optional[str] = None,
+    step_callback: Optional[callable] = None,
 ) -> str:
     """
     外部调用的同步接口
@@ -1293,6 +1331,10 @@ def process_request(
     Args:
         approved_op: 已批准的 operation id（二次调用时传入，跳过危险操作预检）
                      若此 id 在 server._APPROVED_OPS 中，则该操作已获批准，直接执行。
+        step_callback: 可选的步骤回调，签名: callback(step_type, step_data)
+                       step_type: "intent" | "task_start" | "task_done" | "final"
+                       step_data: dict with step details
+                       注意：回调在同步线程中调用，不能执行 async 操作。
 
     用法：
         response = process_request("帮我搜索 GitHub 今天的 AI 趋势", user_id="皇上")
@@ -1328,7 +1370,13 @@ def process_request(
     except Exception:
         initial_state["_strategy"] = {}
 
-    final_state = coordinator_graph.invoke(initial_state)
+    # 使用 ContextVar 传递 step_callback（避免 LangGraph TypedDict 验证过滤）
+    token = _step_callback_var.set(step_callback)
+    try:
+        final_state = coordinator_graph.invoke(initial_state)
+    finally:
+        _step_callback_var.reset(token)
+
     response = final_state.get("final_response", "处理异常，无返回。")
 
     # 进化记忆：记录任务结果
