@@ -4,45 +4,13 @@
 每周日凌晨 2:00 运行，分析自身代码改进机会，推送飞书报告。
 """
 import sys
-import json
+from pathlib import Path
 
-sys.path.insert(0, "/home/asus/hongjun/src")
+# 确保可以导入 hongjun
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from hongjun.self_improver import SelfImprover
-
-
-def notify_feishu(message: str) -> bool:
-    try:
-        import httpx
-        # 获取 tenant_access_token（POST application/json）
-        token_resp = httpx.post(
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            headers={"Content-Type": "application/json"},
-            content=json.dumps({
-                "app_id": "cli_a973462926741cba",
-                "app_secret": "***REMOVED***",
-            }),
-            timeout=10,
-        )
-        token = token_resp.json().get("tenant_access_token", "")
-        if not token:
-            print("❌ 获取飞书 token 失败")
-            return False
-
-        resp = httpx.post(
-            "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            content=json.dumps({
-                "receive_id": "oc_d860f9f653e3421db6ea419a81414cf6",
-                "msg_type": "text",
-                "content": {"text": message},
-            }),
-            timeout=10,
-        )
-        return resp.status_code == 200
-    except Exception as e:
-        print(f"❌ 飞书推送失败: {e}")
-        return False
+from hongjun.feishu_client import FeishuClient, GROUP_CHAT_ID, APP_ID as _app_id, APP_SECRET as _app_secret
 
 
 def main():
@@ -64,7 +32,23 @@ def main():
         message = "✅ 本周无重大改进建议，系统状态良好"
 
     print(message)
-    notify_feishu(f"[鸿钧自我改进报告]\n\n{message}")
+
+    # 飞书推送
+    import asyncio
+    async def _notify():
+        client = FeishuClient(_app_id, _app_secret)
+        try:
+            result = await client.send_text_to_chat(GROUP_CHAT_ID, f"[鸿钧自我改进报告]\n\n{message}")
+            if result.get("code") == 0:
+                print("✅ 飞书推送成功")
+            else:
+                print(f"❌ 飞书推送失败: {result}")
+        except Exception as e:
+            print(f"❌ 飞书推送异常: {e}")
+        finally:
+            await client.close()
+
+    asyncio.run(_notify())
 
 
 if __name__ == "__main__":
