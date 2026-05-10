@@ -345,6 +345,7 @@ const{{ chromium }} = require('playwright');
                 capture_output=True,
                 text=True,
                 timeout=30,
+                env={**os.environ, "NODE_PATH": "/home/asus/.npm-global/lib/node_modules"},
             )
             return result.returncode == 0 and Path(screenshot_path).exists()
         except Exception:
