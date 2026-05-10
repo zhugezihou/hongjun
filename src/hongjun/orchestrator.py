@@ -1187,7 +1187,16 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                         git_out = subprocess.check_output("git status --short", shell=True, text=True).strip() or "工作区干净"
                         cron_out = subprocess.check_output("systemctl status cron.service --no-pager -l", shell=True, text=True).strip()
                         ps_out = subprocess.check_output("ps aux | head -6", shell=True, text=True).strip()
-                        skill_result = f"=== Git ===\n{git_out}\n\n=== Cron ===\n{cron_out}\n\n=== 进程 ===\n{ps_out}"
+                        # 内存信息
+                        mem_out = subprocess.check_output("free -h | grep -E 'Mem|Swap'", shell=True, text=True).strip()
+                        disk_out = subprocess.check_output("df -h / | tail -1", shell=True, text=True).strip()
+                        skill_result = (
+                            f"=== Git ===\n{git_out}\n\n"
+                            f"=== Cron 调度器 ===\n{cron_out}\n\n"
+                            f"=== 进程列表(top 5) ===\n{ps_out}\n\n"
+                            f"=== 内存使用 ===\n{mem_out}\n\n"
+                            f"=== 磁盘使用 ===\n{disk_out}"
+                        )
                     except Exception as e:
                         skill_result = f"[错误] 获取系统状态失败：{e}"
 
