@@ -564,42 +564,25 @@ class HongjunGateway:
         if memory_context:
             full_message = f"{memory_context}\n\n用户最新请求：{message}"
 
-        # ── 步骤3：路由选择 ─────────────────────────────────────────
-        # 通用问答 → 直接 LLM；复杂任务（代码/搜索/记忆）→ 编排器
-        # 注意：编排器自己管理记忆注入，不复用 server 层的 memory_context
-        if HongjunGateway._needs_orchestrator(message):
-            logger.info("[route] 复杂任务，走编排器")
-            _msg = message          # 传原始消息，编排器自己取记忆
-            _plat = session.platform
-            _uid = session.platform_chat_id
-            try:
-                loop = asyncio.get_event_loop()
-                response_text = await loop.run_in_executor(
-                    None,
-                    lambda m=_msg, p=_plat, uid=_uid: HongjunGateway._call_orchestrator_impl(m, p, uid),
-                )
-                if not response_text:
-                    response_text = "【系统】编排器返回了空内容，请稍后重试。"
-                    logger.warning(f"Orchestrator returned empty for message: {_msg[:50]}")
-            except Exception as e:
-                logger.error(f"orchestrator call error: {e}")
-                response_text = f"【系统错误】处理失败：{e}"
-        else:
-            logger.info("[route] 通用问答，直接 LLM")
-            try:
-                llm = _get_llm()
-                if llm is None:
-                    response_text = "【系统】LLM 未就绪，请稍后重试。"
-                else:
-                    messages = [{"role": "user", "content": full_message}]
-                    resp = await llm.chat(messages=messages, model=session.model or self._default_model, temperature=0.3)
-                    response_text = _clean_response(resp.content)
-                    if not response_text:
-                        response_text = "【系统】LLM 返回了空内容，请重试或换个问法。"
-                        logger.warning(f"LLM returned empty content for session {session.id}")
-            except Exception as e:
-                logger.error(f"LLM call error: {e}")
-                response_text = f"【LLM 错误】{e}"
+        # ── 步骤3：统一编排器处理 ────────────────────────────────────
+        # 编排器内含通用问答节点，所有请求统一走编排器，进化记忆自然全量记录。
+        # 注意：不再复用 server 层的 memory_context，编排器自己管理记忆注入。
+        logger.info("[route] 统一走编排器（含通用问答）")
+        _msg = message
+        _plat = session.platform
+        _uid = session.platform_chat_id
+        try:
+            loop = asyncio.get_event_loop()
+            response_text = await loop.run_in_executor(
+                None,
+                lambda m=_msg, p=_plat, uid=_uid: HongjunGateway._call_orchestrator_impl(m, p, uid),
+            )
+            if not response_text:
+                response_text = "【系统】编排器返回了空内容，请稍后重试。"
+                logger.warning(f"Orchestrator returned empty for message: {_msg[:50]}")
+        except Exception as e:
+            logger.error(f"orchestrator call error: {e}")
+            response_text = f"【系统错误】处理失败：{e}"
         # ── 步骤4：安全输出审核 ─────────────────────────────────
         if security_mod and response_text:
             try:
