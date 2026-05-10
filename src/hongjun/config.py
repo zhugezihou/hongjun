@@ -237,28 +237,42 @@ def get_settings(reload: bool = False) -> HongjunSettings:
     return _settings
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """深度合并两个 dict，override 优先级高于 base。"""
+    result = dict(base)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = val
+    return result
+
+
 def _load_yaml_defaults() -> dict:
     """
-    从 config/hongjun.yaml 读取默认值。
-    同时检查兼容路径（~/.config/hongjun/config.yaml, ~/.hermes/config.yaml）。
+    合并所有配置源（项目 config > home config > hermes config），
+    靠后的优先级更高（覆盖前面的值）。
     """
     yaml_paths = [
         _CONFIG_YAML,
         _HOME_CONFIG_PRIMARY,
         _HOME_CONFIG_FALLBACK,
     ]
+    merged: dict = {}
     for path in yaml_paths:
         if path.exists():
             try:
                 with open(path, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
-                logger.info(f"配置加载: {path}")
-                return data
+                if data:
+                    merged = _deep_merge(merged, data)
+                    logger.info(f"配置合并: {path}")
             except Exception as e:
                 logger.warning(f"配置读取失败 {path}: {e}")
 
-    logger.warning(f"未找到配置文件（尝试过: {[str(p) for p in yaml_paths]}）")
-    return {}
+    if not merged:
+        logger.warning(f"未找到配置文件（尝试过: {[str(p) for p in yaml_paths]}）")
+    return merged
 
 
 def _flatten_dict(data: dict, parent_key: str = "", sep: str = "__") -> dict:
