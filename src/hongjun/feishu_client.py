@@ -597,13 +597,28 @@ class FeishuWebSocketHandler:
                         reply_text = data.get("response", "（无响应）")
 
                         def _run_reply():
-                            """在新线程的独立 event loop 中执行异步 reply"""
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
+                            """在新线程中用同步 httpx 直接发飞书 API reply"""
+                            token = self.client._tenant_access_token
+                            if not token:
+                                logger.error("ws_reply_no_token")
+                                return
+                            payload = {
+                                "msg_type": "text",
+                                "content": json.dumps({"text": reply_text}),
+                            }
                             try:
-                                loop.run_until_complete(self.client.reply_text(msg_id, reply_text))
-                            finally:
-                                loop.close()
+                                with httpx.Client(timeout=30.0) as http:
+                                    resp = http.post(
+                                        f"{FEISHU_BASE}/im/v1/messages/{msg_id}/reply",
+                                        json=payload,
+                                        headers={"Authorization": f"Bearer {token}"},
+                                    )
+                                    if resp.status_code == 200:
+                                        logger.info("ws_reply_sent")
+                                    else:
+                                        logger.warning("ws_reply_failed", status=resp.status_code, body=resp.text[:100])
+                            except Exception as ex:
+                                logger.error("ws_reply_error", error=str(ex))
 
                         threading.Thread(target=_run_reply, daemon=True).start()
                         logger.info("ws_replied", text=reply_text[:80])
