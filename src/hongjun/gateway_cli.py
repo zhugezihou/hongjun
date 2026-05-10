@@ -98,7 +98,7 @@ def _stream_sse(
     )
 
     try:
-        resp = urllib.request.urlopen(req, timeout=TIMEOUT_SEC)
+        resp = urllib.request.urlopen(req, timeout=None)  # 无超时，等 SSE 流自然结束
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {e.code}: {body[:500]}")
