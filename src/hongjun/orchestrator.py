@@ -31,6 +31,34 @@ import uuid
 from .self_evolution import verify_and_execute
 
 
+# ── LLM 调用辅助（含记忆注入）───────────────────────────────────────────────
+
+def _llm_call(messages: list[dict], state: dict, intent_type: str = "") -> str:
+    """
+    带记忆注入的 LLM 调用。
+
+    在每次 LLM 调用前，自动注入相关记忆上下文。
+    不修改原始 messages 列表（返回新列表）。
+    """
+    try:
+        from .memory_injection import get_memory_injector
+        injector = get_memory_injector()
+        user_request = state.get("user_request", "") if isinstance(state, dict) else str(state)
+        enriched = injector.inject(messages, user_request, intent_type)
+    except Exception:
+        enriched = messages
+
+    from .gateway.server import _get_llm
+    llm = _get_llm()
+    if not llm:
+        return "[错误] LLM 未配置"
+    try:
+        resp = llm.chat_sync(enriched)
+        return resp.content if hasattr(resp, "content") else str(resp)
+    except Exception as e:
+        return f"[LLM 调用失败] {e}"
+
+
 class TaskType(str, Enum):
     """任务类型枚举"""
     CODE = "code"           # 写代码/执行命令

@@ -12,9 +12,9 @@
 - [x] `task_state.py` - **任务状态持久化** ✅ 2026-05-10
 - [x] `evolution_memory.py` - **集成反思引擎钩子** ✅ 2026-05-10
 - [x] `reflection_engine.py` - **反思引擎（巩固/遗忘经验）** ✅ 2026-05-10
-- [ ] `llm.py` - 统一 LLM 调用（含记忆注入）
-- [ ] `orchestrator.py` - 集成新的 planner 和 executor
-- [ ] 每日定时反思 cron（09:00）
+- [x] `scripts/daily_reflection.py` - **每日反思脚本** ✅ 2026-05-10
+- [x] `hongjun-daily-evolution` cron - **09:00 每日反思** ✅ 2026-05-10
+- [ ] `orchestrator.py` - 集成新的 planner 和 memory_injection
 
 ### 阶段2：自我进化（能反思）
 - [ ] `reflection_engine.py` - **反思引擎：定期复盘，遗忘错误经验，巩固正确经验**
