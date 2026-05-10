@@ -1251,7 +1251,30 @@ def process_request(
     }
 
     final_state = coordinator_graph.invoke(initial_state)
-    return final_state.get("final_response", "处理异常，无返回。")
+    response = final_state.get("final_response", "处理异常，无返回。")
+
+    # 进化记忆：记录任务结果
+    try:
+        from hongjun.evolution_memory import EvolutionMemory
+        mem = EvolutionMemory()
+        is_error = any(err in response for err in ["[错误]", "❌", "失败", "exception"])
+        if is_error:
+            mem.record_failure(
+                task=initial_state.get("intent", "") or user_request[:50],
+                request=user_request,
+                error=response[:300],
+            )
+        else:
+            mem.record_success(
+                task=initial_state.get("intent", "") or user_request[:50],
+                request=user_request,
+                result=response,
+                intent=initial_state.get("intent", ""),
+            )
+    except Exception:
+        pass  # 记忆失败不影响主流程
+
+    return response
 
 
 # === 单元测试 ===
