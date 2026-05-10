@@ -34,6 +34,7 @@ from typing import Optional
 
 # 复用已有的日志和工具
 from hongjun.logging_config import get_logger
+from hongjun.error_pattern import get_error_library
 
 logger = get_logger("hongjun.self_evolution")
 
@@ -508,7 +509,35 @@ class SelfEvolutionLoop:
                 return exec_result
             
             last_error = f"[尝试 {attempt + 1}] {verification.reason}。{verification.suggestion}"
-            
+            error_msg = exec_result.stderr or exec_result.stdout
+
+            # ── Step 1: 查错误模式库 ────────────────────────────────────
+            ep = get_error_library()
+            matched = ep.lookup_by_error(
+                error_type=self._extract_error_type(error_msg),
+                error_message=error_msg,
+            )
+
+            if matched:
+                fix_result = self._apply_known_fix(matched, exec_result, language)
+                if fix_result is not None:
+                    if fix_result.exit_code == 0:
+                        ep.record_fix_success(matched.pattern_id)
+                        self._generation_history.append({
+                            "user_request": user_request,
+                            "code": code,
+                            "language": language,
+                            "result": fix_result,
+                            "attempt": attempt + 1,
+                            "success": True,
+                            "fix_source": "error_pattern",
+                            "pattern_id": matched.pattern_id,
+                        })
+                        return fix_result
+                    else:
+                        ep.record_fix_failure(matched.pattern_id)
+
+            # ── Step 2: LLM 重新生成 ──────────────────────────────────
             # 如果还有重试机会，用错误反馈重新生成代码
             if attempt < verifier.max_attempts:
                 code = self._regenerate_with_feedback(
@@ -535,6 +564,60 @@ class SelfEvolutionLoop:
             stderr=last_error,
             exit_code=1,
         )
+
+    def _apply_known_fix(self, pattern, exec_result: ExecutionResult, language: str) -> Optional[ExecutionResult]:
+        """
+        应用已知的修复方案。
+
+        - fix_command: 执行修复命令，再重新执行原代码
+        - fix_code: 直接用修复代码替换原代码执行
+        Returns: 修复后的执行结果，或 None（无法修复）
+        """
+        import subprocess
+
+        # 有修复命令 → 先执行修复命令，再执行代码
+        if pattern.fix_command:
+            try:
+                logger.info(f"应用已知修复 [{pattern.pattern_id}]: {pattern.fix_description}")
+                subprocess.run(
+                    pattern.fix_command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning(f"修复命令超时 [{pattern.pattern_id}]")
+                return None
+            except Exception as e:
+                logger.warning(f"修复命令失败 [{pattern.pattern_id}]: {e}")
+                return None
+
+            # 重新执行原代码
+            return self.executor.execute(exec_result.file_path, language, "")
+
+        # 有修复代码片段 → 直接执行修复代码
+        if pattern.fix_code:
+            logger.info(f"应用代码修复 [{pattern.pattern_id}]: {pattern.fix_description}")
+            return self.executor.execute(pattern.fix_code, language, "")
+
+        return None
+
+    def _extract_error_type(self, error_message: str) -> str:
+        """从错误信息中提取错误类型"""
+        import re
+        error_types = [
+            "ImportError", "ModuleNotFoundError", "SyntaxError", "TypeError",
+            "ValueError", "RuntimeError", "TimeoutError", "FileNotFoundError",
+            "PermissionError", "MemoryError", "GitError", "JSONDecodeError",
+            "KeyError", "AttributeError", "NameError", "OSError",
+        ]
+        for et in error_types:
+            if et in error_message:
+                return et
+        # 从 Python traceback 提取
+        m = re.search(r"(\w+Error)", error_message)
+        return m.group(1) if m else "RuntimeError"
 
     def _regenerate_with_feedback(
         self,
