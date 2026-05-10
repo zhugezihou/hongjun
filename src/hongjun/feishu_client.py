@@ -583,16 +583,22 @@ class FeishuWebSocketHandler:
 
                 # 在线程池中异步转发到 gateway（避免 event loop 阻塞问题）
                 try:
-                    loop = asyncio.get_event_loop()
-                    loop.run_in_executor(
-                        None,
-                        lambda: asyncio.run(
-                            self._forward_to_gateway(clean_text, msg_id, msg_obj.message.chat_id)
-                        ),
-                    )
+                    with httpx.Client(timeout=60.0) as http:
+                        resp = http.post(
+                            f"{self.gateway_url}/chat",
+                            json={
+                                "message": clean_text,
+                                "platform": "feishu",
+                                "platform_chat_id": msg_obj.message.chat_id,
+                            },
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            reply_text = data.get("response", "（无响应）")
+                            self._reply_to_feishu(msg_id, reply_text, msg_obj.message.chat_id)
                     logger.info("ws_forward_scheduled", text=clean_text[:30], msg_id=msg_id[:20])
                 except Exception as e:
-                    logger.error("ws_forward_executor_error", error=str(e))
+                    logger.error("ws_forward_error", error=str(e))
 
             except Exception as e:
                 logger.error("ws_msg_process_error", error=str(e))
