@@ -450,3 +450,31 @@ def get_discovery() -> SkillDiscovery:
     if _discovery is None:
         _discovery = SkillDiscovery()
     return _discovery
+
+
+# ── CLI 入口 ─────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="鸿钧 · 技能主动发现")
+    parser.add_argument("--notify", action="store_true", help="发现新项目时推送飞书")
+    parser.add_argument("--dry-run", action="store_true", help="仅扫描，不推送也不保存")
+    parser.add_argument("--force", action="store_true", help="强制重新扫描 GitHub（忽略缓存）")
+    args = parser.parse_args()
+
+    sd = get_discovery()
+    findings = sd.scan_and_discover(force_refresh=args.force)
+
+    print(f"发现 {len(findings)} 个相关项目：")
+    for f in findings:
+        status = "🆕" if f.notified else "📦"
+        print(f"  {status} [{f.relevance_score:.2f}] {f.repo}")
+        print(f"     {f.description[:80]}")
+
+    if not args.dry_run and args.notify:
+        notified = sd.notify_feishu()
+        print(f"\n飞书推送: {'成功' if notified else '失败'}")
+
+    stats = sd.get_stats()
+    print(f"\n统计: 共 {stats['total']} 个记录，{stats['notified']} 个已通知")
