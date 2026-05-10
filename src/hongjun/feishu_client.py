@@ -529,7 +529,7 @@ class FeishuWebSocketHandler:
 
                 # 检查 @mention
                 bot_mentioned = any(
-                    (m.mention_key or "").strip() != ""
+                    (m.key or "").strip() != ""
                     for m in mentions
                 ) or any(
                     getattr(m, "id", "") == bot_open_id
@@ -551,13 +551,19 @@ class FeishuWebSocketHandler:
                     chat_id=msg_obj.message.chat_id,
                 )
 
-                if is_bot_msg:
+                # 判断是私聊还是群聊
+                chat_type = getattr(msg_obj.message, 'chat_type', '') or ''
+                is_group = chat_type == 'group'
+                is_dm = chat_type == 'p2p'
+
+                if is_bot_msg and not is_group:
                     return
 
                 if not text.strip():
                     return
 
-                if not bot_mentioned:
+                # 私聊(p2p)不过滤 mention；群聊必须 @bot 才处理
+                if is_group and not bot_mentioned:
                     return
 
                 # 去掉 @mention 前缀
@@ -565,8 +571,10 @@ class FeishuWebSocketHandler:
                 if not clean_text:
                     return
 
-                # 异步转发到 gateway（在主 asyncio loop 执行）
-                asyncio.run(self._forward_to_gateway(clean_text, msg_id, msg_obj.message.chat_id))
+                # 异步转发到 gateway（在已有 event loop 中调度任务）
+                asyncio.get_running_loop().create_task(
+                    self._forward_to_gateway(clean_text, msg_id, msg_obj.message.chat_id)
+                )
 
             except Exception as e:
                 logger.error("ws_msg_process_error", error=str(e))

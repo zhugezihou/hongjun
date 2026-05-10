@@ -48,6 +48,9 @@ data/memory*.db
 *.bak
 *.cache
 
+# Runtime data
+db/feishu_seen.json
+
 # OS
 .DS_Store
 Thumbs.db
