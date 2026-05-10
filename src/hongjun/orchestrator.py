@@ -1256,7 +1256,13 @@ def process_request(
     # 进化记忆：记录任务结果
     try:
         from hongjun.evolution_memory import EvolutionMemory
+        from hongjun.evaluator import HongjunEvaluator
         mem = EvolutionMemory()
+        evaluator = HongjunEvaluator()
+
+        eval_report = evaluator.evaluate(task=initial_state.get("intent", "") or user_request[:50],
+                                          result=response)
+
         is_error = any(err in response for err in ["[错误]", "❌", "失败", "exception"])
         if is_error:
             mem.record_failure(
