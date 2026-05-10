@@ -581,7 +581,7 @@ class FeishuWebSocketHandler:
                 if not clean_text:
                     return
 
-                # 在线程池中异步转发到 gateway（避免 event loop 阻塞问题）
+                # 同步调用 gateway，然后在新线程中执行异步 reply
                 try:
                     with httpx.Client(timeout=60.0) as http:
                         resp = http.post(
@@ -592,14 +592,21 @@ class FeishuWebSocketHandler:
                                 "platform_chat_id": msg_obj.message.chat_id,
                             },
                         )
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            reply_text = data.get("response", "（无响应）")
-                            loop = asyncio.get_event_loop()
-                            loop.run_until_complete(
-                                self.client.reply_text(msg_id, reply_text)
-                            )
-                            logger.info("ws_replied", text=reply_text[:80])
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        reply_text = data.get("response", "（无响应）")
+
+                        def _run_reply():
+                            """在新线程的独立 event loop 中执行异步 reply"""
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            try:
+                                loop.run_until_complete(self.client.reply_text(msg_id, reply_text))
+                            finally:
+                                loop.close()
+
+                        threading.Thread(target=_run_reply, daemon=True).start()
+                        logger.info("ws_replied", text=reply_text[:80])
                     logger.info("ws_forward_scheduled", text=clean_text[:30], msg_id=msg_id[:20])
                 except Exception as e:
                     logger.error("ws_forward_error", error=str(e))
