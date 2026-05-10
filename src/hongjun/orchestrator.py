@@ -114,11 +114,16 @@ def _llm_call(messages: list[dict], state: dict, intent_type: str = "") -> str:
     llm = _get_llm()
     if not llm:
         return "[错误] LLM 未配置"
-    try:
-        resp = llm.chat_sync(enriched)
-        return resp.content if hasattr(resp, "content") else str(resp)
-    except Exception as e:
-        return f"[LLM 调用失败] {e}"
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = llm.chat_sync(enriched)
+            return resp.content if hasattr(resp, "content") else str(resp)
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    return f"[LLM 调用失败] {last_err}"
 
 
 class TaskType(str, Enum):

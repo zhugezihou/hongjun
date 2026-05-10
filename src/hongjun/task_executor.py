@@ -18,6 +18,7 @@
 from __future__ import annotations
 import json
 import subprocess
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -180,17 +181,23 @@ class TaskExecutor:
             else:
                 messages.insert(0, mem_msg)
 
-        try:
-            resp: LLMResponse = chat_sync(
-                messages=messages,
-                model=self.llm_model,
-                temperature=step.tool_args.get("temperature", 0.7),
-                max_tokens=step.tool_args.get("max_tokens", 4096),
-            )
-            step.result = resp.content if hasattr(resp, "content") else str(resp)
-        except Exception as e:
-            step.result = ""
-            raise RuntimeError(f"LLM 调用失败: {e}")
+        last_err = None
+        for attempt in range(3):
+            try:
+                resp: LLMResponse = chat_sync(
+                    messages=messages,
+                    model=self.llm_model,
+                    temperature=step.tool_args.get("temperature", 0.7),
+                    max_tokens=step.tool_args.get("max_tokens", 4096),
+                )
+                step.result = resp.content if hasattr(resp, "content") else str(resp)
+                return step
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+        step.result = ""
+        raise RuntimeError(f"LLM 调用失败: {last_err}")
         return step
 
     def _execute_shell_step(self, step: TaskStep) -> TaskStep:
