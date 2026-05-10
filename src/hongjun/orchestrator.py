@@ -1191,9 +1191,8 @@ def summarize(state: CoordinatorState) -> CoordinatorState:
         if result:
             parts.append(f"**{task['assigned_to'].upper()}**: {result}")
 
-    # 加入记忆上下文（无 skill 时作为参考信息展示）
-    if state.get("memory_context"):
-        parts.insert(0, f"📋 相关记忆:\n{state['memory_context']}")
+    # 注意：memory_context 仅供 LLM 内部参考，不直接显示给用户
+    # （其内容来自 MemPalace，可能包含低质量/高噪音数据，直接展示影响体验）
 
     final_response = "\n\n".join(parts) if parts else "任务执行完成，无返回结果。"
     return {

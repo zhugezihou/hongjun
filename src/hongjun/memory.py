@@ -673,26 +673,41 @@ class HongjunMemory:
         # L0 — 始终使用动态生成的身份文件
         try:
             l0_render = self._stack.l0.render()
-            parts.append(l0_render)
+            # 过滤 MemPalace 返回的噪音消息
+            if l0_render and "No identity configured" not in l0_render and len(l0_render) > 10:
+                parts.append(l0_render)
+            elif IDENTITY_FILE.exists():
+                content = IDENTITY_FILE.read_text(encoding="utf-8").strip()
+                if content:
+                    parts.append(f"## L0 — IDENTITY\n{content}")
         except Exception:
-            parts.append("## L0 — IDENTITY\n鸿钧：中书令。")
+            pass
 
         # L1 — 优先使用 LLM 压缩 cache，cache 不存在则调用 LLM 生成
         l1_cache = read_l1_cache()
+        # 过滤脏数据：包含 LLM 错误/API 配置错误/No identity 等噪音
         if l1_cache and len(l1_cache) > 30:
-            parts.append(l1_cache)
-        elif self._mempalace_available:
+            dirty_patterns = ["【LLM 错误】", "MINIMAX_API_KEY", "No identity configured", "请在 ~/.config"]
+            is_clean = not any(p in l1_cache for p in dirty_patterns)
+            if is_clean:
+                parts.append(l1_cache)
+            else:
+                l1_cache = ""  # 强制重新生成
+        if not l1_cache and self._mempalace_available:
             # 首次或 cache 过期：调用 LLM 生成并 cache
             try:
                 l1 = refresh_l1_with_llm(self.palace_path, top_n=10)
-                if l1 and len(l1) > 30:
-                    parts.append(l1)
+                # 过滤 LLM 生成内容中的噪音
+                dirty_patterns = ["【LLM 错误】", "MINIMAX_API_KEY", "请在 ~/.config", "No identity"]
+                l1_clean = l1 if not any(p in l1 for p in dirty_patterns) else ""
+                if l1_clean and len(l1_clean) > 30:
+                    parts.append(l1_clean)
                 else:
-                    parts.append(self._stack.l1.generate())
+                    fallback_l1 = self._stack.l1.generate()
+                    if fallback_l1 and not any(p in fallback_l1 for p in dirty_patterns):
+                        parts.append(fallback_l1)
             except Exception:
-                parts.append(self._stack.l1.generate())
-        else:
-            parts.append("## L1 — No palace")
+                pass  # 静默，不注入脏数据
 
         return "\n\n".join(parts)
 
@@ -713,16 +728,36 @@ class HongjunMemory:
         """
         return refresh_l1_with_llm(self.palace_path, top_n=10)
 
-    def recall(self, query: str, top_k: int = 5) -> str:
+    def recall(self, query: str, top_k: int = 5, min_score: float = 0.60) -> str:
         """
         检索记忆：L3 深度语义搜索。
+
+        Args:
+            query: 搜索query
+            top_k: 返回条数
+            min_score: 最低相似度阈值（低于此值的结果被过滤）
         """
         if not self._mempalace_available:
             return ""
 
         try:
-            results = self._stack.l3.search(query, n_results=top_k)
-            return results
+            raw_results = self._stack.l3.search(query, n_results=top_k * 2)  # 多取一些，过滤后够用
+            # raw_results 是 JSONL 格式，每行 {"content": "...", "score": 0.x, ...}
+            lines = [l for l in raw_results.strip().split("\n") if l]
+            filtered = []
+            for line in lines:
+                try:
+                    item = json.loads(line)
+                    score = float(item.get("score", 0))
+                    if score >= min_score:
+                        filtered.append(item)
+                    if len(filtered) >= top_k:
+                        break
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            if not filtered:
+                return ""
+            return "\n".join(json.dumps(r) for r in filtered)
         except Exception:
             return ""
 
@@ -759,18 +794,31 @@ class HongjunMemory:
         if wake:
             parts.append(wake)
 
-        # L3 — 语义搜索
+        # L3 — 语义搜索（已由 recall() 按相似度阈值过滤）
         if query:
             search_results = self.recall(query, top_k=max_memories)
-            if search_results and "No results" not in search_results:
-                parts.append(search_results)
+            if search_results:
+                # 格式化 JSONL 为可读列表
+                try:
+                    lines = [l for l in search_results.strip().split("\n") if l]
+                    formatted = []
+                    for i, line in enumerate(lines, 1):
+                        item = json.loads(line)
+                        content = item.get("content", "")[:200]
+                        score = item.get("score", 0)
+                        formatted.append(f"[{i}] (sim={score:.2f}) {content}")
+                    if formatted:
+                        parts.append("## 相关记忆\n" + "\n".join(formatted))
+                except Exception:
+                    pass  # 解析失败则跳过，不污染上下文
 
-        # SQLite 降级兜底
+        # SQLite 降级兜底（仅在有结果时添加）
         if self._mempalace_available:
-            recent = self.get_recent(limit=3)
+            recent = self.get_recent(limit=2)
             if recent:
-                fallback = "## Recent (SQLite fallback)\n" + "\n".join(f"  - {r}" for r in recent)
-                parts.append(fallback)
+                fallback = "## Recent\n" + "\n".join(f"  - {r[:100]}" for r in recent if len(r) > 5)
+                if fallback.strip() != "## Recent":
+                    parts.append(fallback)
 
         if not parts:
             return ""
