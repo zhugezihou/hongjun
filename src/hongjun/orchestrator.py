@@ -28,6 +28,7 @@ from pathlib import Path
 import re
 import time
 import uuid
+from .self_evolution import verify_and_execute
 
 
 class TaskType(str, Enum):
@@ -1046,10 +1047,12 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                         llm = _get_llm()
                         if llm:
                             code_resp = llm.chat_sync([
-                                {"role": "system", "content": "你是一个专业的代码生成器。用户要求写代码时，直接输出代码（用markdown ```包裹），不要解释。"},
+                                {"role": "system", "content": "你是一个专业的代码生成器。用户要求写代码时，直接输出代码（用markdown ```包裹），不要解释。如果涉及可视化效果（动画、游戏、图表），请生成可运行的 HTML/JS 代码。"},
                                 {"role": "user", "content": task}
                             ])
-                            skill_result = code_resp.content if hasattr(code_resp, "content") else str(code_resp)
+                            raw_code = code_resp.content if hasattr(code_resp, "content") else str(code_resp)
+                            # 自我验证回路：生成代码后自动执行并验证结果
+                            skill_result = verify_and_execute(req, raw_code)
                         else:
                             skill_result = "[错误] LLM 未配置"
                     except Exception as e:
