@@ -1206,9 +1206,27 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
                     try:
                         history = _conversation_history_var.get() or []
                         if history:
-                            # 复用会话历史（最后一条通常是当前消息，追加到末尾）
-                            msgs = list(history)
-                            msgs.append({"role": "user", "content": req})
+                            # 复用会话历史，但过滤掉 think 内容（防止污染渗入）
+                            filtered = []
+                            for m in history:
+                                if m.get("role") == "assistant":
+                                    cleaned = re.sub(
+                                        r'<think>.*?</think>', '',
+                                        m.get("content", ""),
+                                        flags=re.DOTALL
+                                    ).strip()
+                                    # 过滤掉 task list 等元信息
+                                    cleaned = re.sub(
+                                        r'\[Your active task list.*?\]', '',
+                                        cleaned,
+                                        flags=re.DOTALL
+                                    ).strip()
+                                    if cleaned:
+                                        filtered.append({**m, "content": cleaned})
+                                elif m.get("role") == "user":
+                                    filtered.append(m)
+                            filtered.append({"role": "user", "content": req})
+                            msgs = filtered
                         else:
                             msgs = [{"role": "user", "content": req}]
                         skill_result = _llm_call(msgs, state, intent_type="conversation")
@@ -1223,8 +1241,26 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
             try:
                 history = _conversation_history_var.get() or []
                 if history:
-                    msgs = list(history)
-                    msgs.append({"role": "user", "content": state["user_request"]})
+                    # 过滤掉 think 内容
+                    filtered = []
+                    for m in history:
+                        if m.get("role") == "assistant":
+                            cleaned = re.sub(
+                                r'<think>.*?</think>', '',
+                                m.get("content", ""),
+                                flags=re.DOTALL
+                            ).strip()
+                            cleaned = re.sub(
+                                r'\[Your active task list.*?\]', '',
+                                cleaned,
+                                flags=re.DOTALL
+                            ).strip()
+                            if cleaned:
+                                filtered.append({**m, "content": cleaned})
+                        elif m.get("role") == "user":
+                            filtered.append(m)
+                    filtered.append({"role": "user", "content": state["user_request"]})
+                    msgs = filtered
                 else:
                     msgs = [{"role": "user", "content": state["user_request"]}]
                 skill_result = _llm_call(msgs, state, intent_type="conversation")
@@ -1269,12 +1305,23 @@ def summarize(state: CoordinatorState) -> CoordinatorState:
     if state.get("skill_result"):
         skill_result = state["skill_result"]
 
-        # 清理 compaction REFERENCE 标记（防止 session 历史中的污染渗入）
+        # 清理：compaction REFERENCE 标记、think 标签、task list 等元信息
         cleaned = re.sub(
-            r'\[CONTEXT COMPACTION.*?\]\s*|\*\*REFERENCE ONLY\*\*.*?(?=\n\n|\Z)',
-            '',
+            r'<think>.*?</think>', '',
             skill_result,
-            flags=re.DOTALL | re.IGNORECASE,
+            flags=re.DOTALL
+        )
+        cleaned = re.sub(
+            r'\[CONTEXT COMPACTION.*?\]|\*\*REFERENCE ONLY\*\*.*?(?=\n\n|\Z)',
+            '',
+            cleaned,
+            flags=re.DOTALL | re.IGNORECASE
+        )
+        cleaned = re.sub(
+            r'\[Your active task list.*?\]',
+            '',
+            cleaned,
+            flags=re.DOTALL
         ).strip()
 
         # 步骤回调：最终回复已生成（仅第一次调用时发射；审批后第二次调用跳过）
