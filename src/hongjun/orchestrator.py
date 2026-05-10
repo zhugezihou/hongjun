@@ -37,16 +37,60 @@ def _llm_call(messages: list[dict], state: dict, intent_type: str = "") -> str:
     """
     带记忆注入的 LLM 调用。
 
-    在每次 LLM 调用前，自动注入相关记忆上下文。
+    策略：日期/时间问题直接用 Python 回答（不依赖 LLM 知识库）。
+    其他问题走 LLM，注入记忆上下文 + 当前系统时间。
     不修改原始 messages 列表（返回新列表）。
     """
+    import datetime as dt, re
+
+    # ── 日期/时间快速路径（直接用 Python 回答，不走 LLM）──
+    user_msg = ""
+    for m in messages:
+        if m.get("role") == "user":
+            user_msg = m.get("content", "")
+            break
+    if not user_msg:
+        user_request = state.get("user_request", "") if isinstance(state, dict) else str(state)
+        user_msg = user_request
+
+    date_patterns = [
+        (r"今天|今日|现在", 0),
+        (r"明天|明日", 1),
+        (r"后天|后日", 2),
+        (r"大后天|大后日", 3),
+        (r"昨天|昨日", -1),
+        (r"前天|前一日", -2),
+    ]
+    now = dt.datetime.now()
+    weekday_cn = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    for pattern, days_ahead in date_patterns:
+        if re.search(pattern, user_msg) and any(
+            k in user_msg for k in ["星期几", "周几", "几号", "哪天", "什么星期", "星期", "号"]
+        ):
+            future = now + dt.timedelta(days=days_ahead)
+            date_str = future.strftime(f"%Y年%m月%d日 {weekday_cn[future.weekday()]}")
+            pref = {0: "今天", 1: "明天", 2: "后天", 3: "大后天", -1: "昨天", -2: "前天"}[days_ahead]
+            return f"{pref}是{date_str}。"
+
+    # ── LLM 路径（其他问题）──
     try:
         from .memory_injection import get_memory_injector
         injector = get_memory_injector()
         user_request = state.get("user_request", "") if isinstance(state, dict) else str(state)
-        enriched = injector.inject(messages, user_request, intent_type)
+        enriched = injector.inject(list(messages), user_request, intent_type)
     except Exception:
-        enriched = messages
+        enriched = list(messages)  # 复制，避免修改原始列表
+
+    # 注入当前系统时间
+    date_str = now.strftime(f"%Y年%m月%d日 {weekday_cn[now.weekday()]} %H:%M:%S")
+    system_with_time = {
+        "role": "system",
+        "content": f"当前系统时间（真实时间）：{date_str}。回答日期/时间相关问题时以此为准。"
+    }
+    if enriched and enriched[0].get("role") == "system":
+        enriched[0]["content"] = system_with_time["content"] + "\n\n" + enriched[0]["content"]
+    else:
+        enriched.insert(0, system_with_time)
 
     from .gateway.server import _get_llm
     llm = _get_llm()
@@ -1134,7 +1178,6 @@ def dispatch_and_execute(state: CoordinatorState) -> CoordinatorState:
             pass  # fallback to pure LLM
 
         # ── 如果没有任何结果 → 直接走 conversation（通用问答）──
-        # 注意：不要在这里 append 无用的系统消息，summarize 会用 skill_result 决定输出
         if not skill_result:
             try:
                 skill_result = _llm_call(
