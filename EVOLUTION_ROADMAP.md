@@ -31,9 +31,16 @@
 - [x] `hongjun-skill-discovery` cron - **每周日 10:00 扫描 GitHub trending** ✅ 2026-05-10
   - `python -m hongjun.skill_discovery --notify`
 
-### 阶段3：持续进化（能超越）
-- [ ] `meta_learner.py` - 元学习：什么策略适合什么任务
-- [ ] `self_improver.py` - 主动修改自身代码逻辑
+### 阶段3：持续进化（能超越）🔨
+- [x] `meta_learner.py` - **元学习：根据任务特征选择最佳策略** ✅ 2026-05-10
+  - 策略类型：planning_strategy / execution_mode / verification_level / retry_policy
+  - 从历史任务学习：成功/失败 → 更新各策略置信度
+  - `recommend()` → 推荐策略 + 置信度 + 理由
+  - 集成到 orchestrator：每次任务记录策略结果
+- [x] `self_improver.py` - **主动改进：基于反思+错误模式优化自身代码** ✅ 2026-05-10
+  - 静态分析 + 错误模式分析 → 识别改进点
+  - LLM 生成改进代码，应用前健康检查，回滚保护
+  - `hongjun-self-improvement` cron — 每周日 02:00 分析并推送报告
 
 ## 核心原则
 

@@ -18,13 +18,21 @@
   reflection_engine — 定期复盘，巩固正确经验/遗忘错误经验
   evolution_memory  — 进化记忆系统（集成反思引擎钩子）
 
+新增（阶段2）：
+  error_pattern     — 错误模式积累：错误类型→修复方案映射库
+  skill_discovery   — 主动技能发现：定期搜索 GitHub trending
+
+新增（阶段3）：
+  meta_learner      — 元学习：根据任务特征选择最佳策略
+  self_improver     — 主动改进：基于反思+错误模式优化自身代码
+
 MCP 端口：
   HongjunMCPServer: 20786（stdio）/ HTTP SSE
 
 鸿钧 Gateway: 20830（HTTP REST）
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from .orchestrator import CoordinatorState, coordinator_graph
 from .memory import HongjunMemory

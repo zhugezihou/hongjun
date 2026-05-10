@@ -1270,6 +1270,14 @@ def process_request(
         "_approved_ops": _approved_ops,       # server._APPROVED_OPS 引用
     }
 
+    # 元学习：获取策略推荐
+    try:
+        from hongjun.meta_learner import get_learner
+        strategy = get_learner().recommend(user_request)
+        initial_state["_strategy"] = strategy.to_dict()
+    except Exception:
+        initial_state["_strategy"] = {}
+
     final_state = coordinator_graph.invoke(initial_state)
     response = final_state.get("final_response", "处理异常，无返回。")
 
@@ -1277,6 +1285,7 @@ def process_request(
     try:
         from hongjun.evolution_memory import EvolutionMemory
         from hongjun.evaluator import HongjunEvaluator
+        from hongjun.meta_learner import get_learner
         mem = EvolutionMemory()
         evaluator = HongjunEvaluator()
 
@@ -1284,19 +1293,37 @@ def process_request(
                                           result=response)
 
         is_error = any(err in response for err in ["[错误]", "❌", "失败", "exception"])
+        intent_used = final_state.get("intent", "") or initial_state.get("intent", "")
+        strategy_used = initial_state.get("_strategy")
+
         if is_error:
             mem.record_failure(
-                task=initial_state.get("intent", "") or user_request[:50],
+                task=intent_used or user_request[:50],
                 request=user_request,
                 error=response[:300],
             )
+            if strategy_used:
+                get_learner().record(
+                    task_request=user_request,
+                    intent=intent_used,
+                    strategy=strategy_used,
+                    success=False,
+                    error=response[:200],
+                )
         else:
             mem.record_success(
-                task=initial_state.get("intent", "") or user_request[:50],
+                task=intent_used or user_request[:50],
                 request=user_request,
                 result=response,
-                intent=initial_state.get("intent", ""),
+                intent=intent_used,
             )
+            if strategy_used:
+                get_learner().record(
+                    task_request=user_request,
+                    intent=intent_used,
+                    strategy=strategy_used,
+                    success=True,
+                )
     except Exception:
         pass  # 记忆失败不影响主流程
 

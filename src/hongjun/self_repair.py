@@ -37,6 +37,7 @@ SAFE_TO_MODIFY = {
     "cli", "llm", "logging_config", "config",
     "reflection_engine", "planner", "task_executor", "task_state",
     "memory_injection", "error_pattern", "skill_discovery",
+    "meta_learner", "self_improver",
 }
 
 # 不可自改的模块（安全关键）
