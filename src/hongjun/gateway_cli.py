@@ -329,7 +329,7 @@ def _print_banner(gateway: str) -> None:
         uptime = status.get("uptime", "?")
         banner = f"""{BOLD}{CYAN}
   ╔════════════════════════════════════════╗
-  ║     鸿钧 Gateway CLI  (v2.0.0)       ║
+  ║     鸿钧 Gateway CLI  (v{ver})       ║
   ║     Gateway: {gateway}      ║
   ║     版本: {ver}   在线: {uptime}          ║
   ║     输入 exit/quit 退出                ║
@@ -337,7 +337,7 @@ def _print_banner(gateway: str) -> None:
     else:
         banner = f"""{BOLD}{CYAN}
   ╔════════════════════════════════════════╗
-  ║     鸿钧 Gateway CLI  (v2.0.0)       ║
+  ║     鸿钧 Gateway CLI  (v?)       ║
   ║     Gateway: {gateway}              ║
   ║     ⚠️  Gateway 连接失败               ║
   ╚════════════════════════════════════════╝{RESET}"""

@@ -219,6 +219,11 @@ def _get_evaluator():
 
 from hongjun.logging_config import get_logger
 
+try:
+    from hongjun import __version__ as HONGJUN_VERSION
+except Exception:
+    HONGJUN_VERSION = "0.4.0"
+
 logger = get_logger("hongjun.gateway")
 
 
@@ -1029,7 +1034,7 @@ class HongjunGateway:
         ]
         return web.json_response({
             "status": "running",
-            "version": "0.1.0",
+            "version": HONGJUN_VERSION,
             "uptime": self.started_at,
             "port": self.port,
             "queue": queue_status,
