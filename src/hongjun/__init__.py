@@ -33,12 +33,10 @@ MCP 端口：
 """
 
 __version__ = "0.4.0"
-
-from .orchestrator import CoordinatorState, coordinator_graph
-from .memory import HongjunMemory
-
 __all__ = [
     "coordinator_graph",
     "CoordinatorState",
     "HongjunMemory",
 ]
+from .orchestrator import CoordinatorState, coordinator_graph
+from .memory import HongjunMemory
