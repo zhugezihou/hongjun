@@ -9,6 +9,18 @@
 Usage:
     python watchdog.py              # 前台运行
     python watchdog.py --daemon     # 守护进程模式
+
+systemd 用户服务（开机自启）:
+    # 安装服务文件（已配置在 ~/.config/systemd/user/hongjun-watchdog.service）
+    systemctl --user daemon-reload
+    systemctl --user enable hongjun-watchdog.service
+    systemctl --user start hongjun-watchdog.service
+
+    # 状态查看
+    systemctl --user status hongjun-watchdog.service
+
+    # 日志
+    journalctl --user -u hongjun-watchdog.service -f
 """
 
 import argparse
