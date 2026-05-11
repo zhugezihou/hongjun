@@ -324,24 +324,76 @@ def _input_with_history(prompt: str) -> str:
 
 def _print_banner(gateway: str) -> None:
     status = _get_status(gateway)
+
+    # ── 葫芦 ASCII Art（8行，左侧展示）──────────────────────────────────────
+    GOURD_LINES = [
+        "         ╭━━━━━╮",
+        "       ╱         ╲",
+        "      │  ◯     ◯  │",
+        "      │    ╭━━╯   │",
+        "      │   ╱       │",
+        "       ╲ ╱    ╱╱╱╱",
+        "        ╳    ╱╱╱╱",
+        "       ╱ ╲  ╱╱╱╱",
+    ]
+
     if "error" not in status:
         ver = status.get("version", "?")
         uptime = status.get("uptime", "?")
-        banner = f"""{BOLD}{CYAN}
-  ╔════════════════════════════════════════╗
-  ║     鸿钧 Gateway CLI  (v{ver})       ║
-  ║     Gateway: {gateway}      ║
-  ║     版本: {ver}   在线: {uptime}          ║
-  ║     输入 exit/quit 退出                ║
-  ╚════════════════════════════════════════╝{RESET}"""
+        HEADER = f"""{BOLD}{CYAN}
+  ╔══════════════════════════════════════════════════════╗
+  ║       鸿钧 Gateway CLI  (v{ver})                       ║
+  ║       Gateway: {gateway}                  ║
+  ║       版本: {ver}   在线: {uptime}                      ║
+  ╚══════════════════════════════════════════════════════╝{RESET}"""
     else:
-        banner = f"""{BOLD}{CYAN}
-  ╔════════════════════════════════════════╗
-  ║     鸿钧 Gateway CLI  (v?)       ║
-  ║     Gateway: {gateway}              ║
-  ║     ⚠️  Gateway 连接失败               ║
-  ╚════════════════════════════════════════╝{RESET}"""
-    print(banner)
+        HEADER = f"""{BOLD}{CYAN}
+  ╔══════════════════════════════════════════════════════╗
+  ║       鸿钧 Gateway CLI  (v?)                         ║
+  ║       Gateway: {gateway}                              ║
+  ║       ⚠️  Gateway 连接失败                               ║
+  ╚══════════════════════════════════════════════════════╝{RESET}"""
+
+    # ── 指令集（右侧，8条）────────────────────────────────────────────────
+    instr_items = [
+        ("exit / quit / q",  "退出交互模式"),
+        ("/new",             "开启新会话"),
+        ("!command",          "执行本地 shell 命令"),
+        ("--no-steps",        "关闭执行步骤展示"),
+        ("--gateway <port>",  "指定 Gateway 端口"),
+        ("/skills",           "查看可用 Skills 列表"),
+        ("/doctor",           "运行鸿钧自检"),
+        ("/help",             "显示此帮助面板"),
+    ]
+
+    # 左右拼版：左侧葫芦宽12字符，右侧指令集面板
+    logo_col_w = 16   # 葫芦区总宽度
+    logo_padding = 2  # 葫芦与右边框间距
+
+    print(HEADER)
+    print()
+
+    # 面板顶部
+    print(f"  {CYAN}╔{'═' * (logo_col_w + logo_padding)}╗╔{'═' * 44}╗{RESET}")
+    # 标题行（跨越左右）
+    print(f"  {CYAN}║{RESET}{' ' * (logo_col_w + logo_padding)}{CYAN}║{RESET}  {BOLD}{CYAN}🧧  鸿 钧 · 指 令 集{CYAN}{RESET}                      {CYAN}║{RESET}")
+    print(f"  {CYAN}╠{'═' * (logo_col_w + logo_padding)}╣╠{'═' * 44}╣{RESET}")
+
+    # 逐行渲染葫芦 + 指令（指令比葫芦多时葫芦区留空）
+    for i, (cmd, desc) in enumerate(instr_items):
+        if i < len(GOURD_LINES):
+            gourd = GOURD_LINES[i]
+            # 葫芦区：左 border + gourd + padding + 右 border
+            logo_cell = f"{CYAN}║{RESET}{CYAN}{gourd}{' ' * (logo_col_w - len(gourd) - logo_padding)}{RESET}{CYAN} ║{RESET}"
+        else:
+            # 葫芦行结束后，左侧填空格
+            logo_cell = f"{CYAN}║{RESET}{' ' * logo_col_w}{CYAN} ║{RESET}"
+
+        instr_cell = f"  {WHITE}{BOLD}{cmd:<22}{RESET}{GREEN}—{RESET}  {WHITE}{desc:<18}{RESET}  {CYAN}║{RESET}"
+        print(f"{logo_cell}{instr_cell}")
+
+    # 面板底部
+    print(f"  {CYAN}╚{'━' * (logo_col_w + logo_padding)}╝╚{'━' * 44}╝{RESET}")
 
 
 def run_chat(
