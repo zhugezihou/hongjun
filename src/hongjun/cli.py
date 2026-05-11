@@ -584,6 +584,108 @@ def run_once(query: str, function_list: Optional[list[str]] = None) -> None:
 
 # ── Session 管理命令 ─────────────────────────────────────────────────────────
 
+def run_doctor() -> None:
+    """运行自检医生：完整检查 + 自动修复 + 友好输出"""
+    import time
+    from hongjun.logging_config import get_logger
+
+    logger = get_logger("hongjun.doctor")
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    RED = "\033[31m"
+    CYAN = "\033[36m"
+    DIM = "\033[2m"
+
+    def c(text, color): return f"{color}{text}{RESET}"
+
+    print(c("\n  🔍 鸿钧 Doctor 自检中...\n", BOLD + CYAN))
+
+    hongjun_root = Path(__file__).parent.parent.parent  # /home/asus/hongjun/src/hongjun/cli.py → parent.parent.parent = /home/asus/hongjun/
+    sys.path.insert(0, str(hongjun_root / "src"))
+    sys.path.insert(0, str(hongjun_root))  # for scripts/
+    from hongjun.self_repair import SelfRepairEngine
+    from scripts.self_check import check_gateway, restart_gateway, check_logs
+
+    # ── 1. Gateway 健康检查 ────────────────────────────────────────
+    print(c("  [1/4] 检查 Gateway 进程...", DIM), end=" ", flush=True)
+    gw = check_gateway()
+    if gw["status"] == "OK":
+        print(c("✅ 正常", GREEN))
+    else:
+        print(c(f"❌ {gw['status']}", RED))
+        print(c(f"       尝试重启... ", DIM), end=" ", flush=True)
+        result = restart_gateway()
+        time.sleep(5)
+        gw2 = check_gateway()
+        if gw2["status"] == "OK":
+            print(c(f"✅ 已恢复 PID={result.get('pid')}", GREEN))
+        else:
+            print(c(f"❌ 重启失败", RED))
+
+    # ── 2. 日志错误扫描 ───────────────────────────────────────────
+    print(c("  [2/4] 扫描日志错误...", DIM), end=" ", flush=True)
+    errors = check_logs()
+    if errors:
+        print(c(f"⚠️  发现 {len(errors)} 条", YELLOW))
+        seen = set()
+        for e in errors[:5]:
+            short = e[:120]
+            if short not in seen:
+                seen.add(short)
+                print(f"    {c('•', YELLOW)} `{short}`")
+    else:
+        print(c("✅ 无错误", GREEN))
+
+    # ── 3. 代码诊断 ────────────────────────────────────────────────
+    print(c("  [3/4] 诊断代码模块...", DIM), end=" ", flush=True)
+    engine = SelfRepairEngine()
+    diag = engine.run_diagnostics()
+    if diag.issues:
+        print(c(f"⚠️  发现 {len(diag.issues)} 个问题", YELLOW))
+        for iss in diag.issues[:5]:
+            sev = c(iss.severity.upper(), RED if iss.severity == "critical" else YELLOW)
+            print(f"    {c('•', YELLOW)} [{sev}] {iss.module}: {iss.description[:80]}")
+    else:
+        print(c(f"✅ {diag.modules_ok} 个模块正常", GREEN))
+
+    # ── 4. 自动修复 ────────────────────────────────────────────────
+    repairs_done = []
+    if diag.issues:
+        print(c("  [4/4] 尝试自动修复...", DIM))
+        for iss in diag.issues:
+            if iss.severity not in ("critical", "error"):
+                continue
+            if not iss.module:
+                continue
+            print(f"    修复 {iss.module}... ", end="", flush=True)
+            results = engine.fix_module(iss.module, f"{iss.description} at line {iss.line}")
+            if results and results[0].success:
+                print(c("✅", GREEN), c(results[0].description[:60], DIM))
+                repairs_done.append(results[0])
+            else:
+                reason = results[0].reason if results else "UNKNOWN"
+                print(c(f"❌ {reason}", RED), c(results[0].description[:60] if results else "", DIM))
+    else:
+        print(c("  [4/4] 无需修复", DIM))
+
+    # ── 汇总 ──────────────────────────────────────────────────────
+    print()
+    all_good = gw["status"] == "OK" and not errors and not diag.issues
+    if all_good:
+        print(c(f"  ✅ 鸿钧状态：**一切正常**", BOLD + GREEN))
+    elif repairs_done:
+        print(c(f"  🔧 已自动修复 {len(repairs_done)} 项，Gateway 运行中", BOLD + YELLOW))
+    elif gw["status"] != "OK":
+        print(c(f"  ❌ Gateway 异常，请检查", BOLD + RED))
+    elif diag.issues:
+        print(c(f"  ⚠️  存在 {len(diag.issues)} 个代码问题（见上方）", BOLD + YELLOW))
+    else:  # 有日志警告但 gateway 正常
+        print(c(f"  ✅ Gateway 正常，日志有 {len(errors)} 条历史警告（可忽略）", BOLD + YELLOW))
+    print()
+
+
 def run_list() -> None:
     """列出所有会话"""
     store = SessionStore()
@@ -636,6 +738,8 @@ def main() -> None:
     parser.add_argument("--list", "-l", action="store_true", help="列出所有会话")
     parser.add_argument("--show", help="显示会话内容")
     parser.add_argument("--delete", help="删除指定会话")
+    parser.add_argument("--doctor", action="store_true", help="自检医生：完整检查 + 自动修复")
+    parser.add_argument("--fix", action="store_true", help="自检医生（--doctor 的别名）")
     parser.add_argument(
         "--tools", "-t", nargs="*", default=["shell"],
         help="启用的工具列表（默认: shell）",
@@ -657,6 +761,10 @@ def main() -> None:
         store = SessionStore()
         ok = store.delete_session(args.delete)
         print(color(f"  {'✅ 已删除' if ok else '❌ 会话不存在'}", GREEN if ok else RED))
+        return
+
+    if args.doctor or args.fix:
+        run_doctor()
         return
 
     if args.query or args.once:
